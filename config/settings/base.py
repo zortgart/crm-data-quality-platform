@@ -42,16 +42,30 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
-    # Added phase by phase
-    # Phase 1: common only (no models yet)
+    # Phase 1
     "common",
-    # Phase 2+: accounts, organizations, companies, contacts, etc.
+    # Phase 2: database foundation
+    "organizations",
+    "accounts",
+    # Phase 4+: companies, contacts, imports, audit, enrichment, validation
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 # =============================================================
-# MIDDLEWARE
+# CUSTOM USER MODEL
+# =============================================================
+# CRITICAL: Must be set BEFORE the first migration.
+# Tells Django to use our custom User instead of auth.User.
+# After this is set and migrations applied, changing it is
+# extremely painful — this is a one-way door.
+#
+# Java equivalent:
+#   Spring Security's UserDetails implementation class
+#   configured in SecurityConfig.userDetailsService()
+# =============================================================
+AUTH_USER_MODEL = "accounts.User"
+
 # Processes every request/response pair in order (top = outermost).
 # Java equivalent: Servlet Filters / Spring Interceptors
 # =============================================================
