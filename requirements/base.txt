@@ -1,0 +1,17 @@
+# =============================================================
+# BASE REQUIREMENTS — Phase 1: Local Foundation
+# =============================================================
+# These are the ONLY dependencies for Phase 1.
+# More packages will be added in later phases.
+
+# Core Framework
+Django==5.1.4
+djangorestframework==3.15.2
+
+# PostgreSQL adapter (psycopg v3 — modern, async-capable)
+# psycopg[binary] includes compiled C extensions for performance
+psycopg[binary]>=3.2.10
+
+# Environment variable management
+# Reads from .env file and provides typed access
+python-decouple==3.8

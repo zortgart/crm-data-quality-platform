@@ -1,0 +1,14 @@
+# =============================================================
+# DEVELOPMENT REQUIREMENTS — Phase 1
+# =============================================================
+# Extends base.txt with local development tools.
+
+-r base.txt
+
+# Testing framework
+pytest==8.3.4
+pytest-django==4.9.0
+
+# Interactive Python shell with auto-imports (Django-aware)
+django-extensions==3.2.3
+ipython==8.30.0

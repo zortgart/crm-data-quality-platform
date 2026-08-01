@@ -1,0 +1,3 @@
+# Convenience top-level requirements file
+# Points to the development requirements
+-r requirements/development.txt
