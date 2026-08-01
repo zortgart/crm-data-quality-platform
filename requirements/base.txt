@@ -5,7 +5,7 @@
 # More packages will be added in later phases.
 
 # Core Framework
-Django==5.1.4
+Django>=5.2,<6.0
 djangorestframework==3.15.2
 
 # PostgreSQL adapter (psycopg v3 — modern, async-capable)
