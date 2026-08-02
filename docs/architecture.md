@@ -1,7 +1,7 @@
 # Architecture — CRM Data Quality & Enrichment Platform
 
 > **Living document** — updated after every phase completion.
-> Last updated: Phase 3 — Security Foundation
+> Last updated: Phase 4 — Core Domain
 
 ---
 
@@ -12,8 +12,8 @@
 | 1 — Local Foundation | ✅ Complete | Django + DRF + PostgreSQL + health endpoints |
 | 2 — Database Foundation | ✅ Complete | Organization, CustomUser, UUID PKs, migrations |
 | 3 — Security Foundation | ✅ Complete | JWT auth, RBAC roles, logout blacklist, tenant isolation |
-| 4 — Core Domain | 🔜 Next | Companies, Contacts CRUD |
-| 5 — PostgreSQL + ORM | ⏳ | Indexes, EXPLAIN, N+1 |
+| 4 — Core Domain | ✅ Complete | Companies, Contacts CRUD |
+| 5 — PostgreSQL + ORM | 🔜 Next | Indexes, EXPLAIN, N+1 |
 | 6 — Data Quality | ⏳ | Normalize, validate, deduplicate, score |
 | 7 — Large Data | ⏳ | CSV import, streaming |
 | 8 — Background Processing | ⏳ | Celery + Redis |
@@ -447,3 +447,65 @@ Every endpoint is now authenticated by default. Public endpoints opt out with `p
 | `test_models.py` | 14 | Organization + User models |
 | `test_auth.py` | 19 | Login, logout, refresh, /me/, RBAC, tenant |
 | **Total** | **41** | |
+
+---
+
+## PHASE 4 — Core Domain (Added)
+
+### New Files Added
+
+```
+companies/
+├── models.py          ← Company model
+├── serializers.py     ← CompanyListSerializer, CompanyDetailSerializer
+├── views.py           ← CompanyViewSet
+├── urls.py            ← Company routes
+└── admin.py           ← Company admin
+
+contacts/
+├── models.py          ← Contact model
+├── serializers.py     ← ContactListSerializer, ContactDetailSerializer
+├── views.py           ← ContactViewSet
+├── urls.py            ← Contact routes
+└── admin.py           ← Contact admin
+
+tests/
+├── test_companies.py  ← 5 tests (CRUD, RBAC, tenant isolation)
+└── test_contacts.py   ← 3 tests (CRUD, cross-tenant validation)
+```
+
+### API Endpoints (Phase 4)
+
+| Method | URL | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/api/v1/companies/` | ✅ ANALYST | List companies (tenant scoped) |
+| `POST` | `/api/v1/companies/` | ✅ MANAGER | Create company |
+| `GET` | `/api/v1/companies/{id}/` | ✅ ANALYST | Retrieve company |
+| `PUT/PATCH` | `/api/v1/companies/{id}/` | ✅ MANAGER | Update company |
+| `DELETE` | `/api/v1/companies/{id}/` | ✅ MANAGER | Delete company |
+| `GET` | `/api/v1/contacts/` | ✅ ANALYST | List contacts (tenant scoped) |
+| `POST` | `/api/v1/contacts/` | ✅ MANAGER | Create contact |
+| `GET` | `/api/v1/contacts/{id}/` | ✅ ANALYST | Retrieve contact |
+| `PUT/PATCH` | `/api/v1/contacts/{id}/` | ✅ MANAGER | Update contact |
+| `DELETE` | `/api/v1/contacts/{id}/` | ✅ MANAGER | Delete contact |
+
+### Security & Multi-Tenancy Enforcement
+
+- **Organization ID injected server-side**: When creating a Company or Contact, the client CANNOT specify the organization. It's injected automatically via `perform_create(self, serializer)` using `request.user.organization`.
+- **Tenant-scoped queries**: `get_queryset()` in ViewSets ALWAYS filters by the user's organization. Cross-tenant access is impossible.
+- **Cross-tenant references prevented**: `ContactDetailSerializer.validate_company()` ensures you can't assign a Contact to a Company belonging to a different organization.
+
+### Performance Optimization
+
+- Used `select_related("organization")` (and `"company"`) in ViewSets to perform SQL JOINs, avoiding N+1 query problems when serializers access related fields.
+
+### Test Count After Phase 4
+
+| File | Tests | Covers |
+|---|---|---|
+| `test_health.py` | 8 | Health + readiness endpoints |
+| `test_models.py` | 14 | Organization + User models |
+| `test_auth.py` | 19 | Login, logout, refresh, /me/, RBAC, tenant |
+| `test_companies.py` | 5 | Companies CRUD, RBAC, isolation |
+| `test_contacts.py` | 3 | Contacts CRUD, cross-tenant validation |
+| **Total** | **49** | |

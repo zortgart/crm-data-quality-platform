@@ -2,7 +2,7 @@
 
 > **Living document** — a new section is added after every phase.
 > Use this to prepare for backend engineering interviews.
-> Last updated: Phase 3 — Security Foundation
+> Last updated: Phase 4 — Core Domain
 
 ---
 
@@ -486,3 +486,74 @@ response = client.get("/api/v1/auth/me/")
 8. What is refresh token rotation? Why is it a security best practice?
 9. What custom claims did we add to the JWT payload? Why?
 10. What is the Java equivalent of DRF's `APIClient` in tests?
+
+---
+
+---
+
+## PHASE 4 — Core Domain
+
+### Key Concepts
+
+#### 1. REST ViewSets (ModelViewSet)
+**What:** DRF's `ModelViewSet` automatically provides full CRUD endpoints (`list`, `create`, `retrieve`, `update`, `partial_update`, `destroy`) mapped to a database model.
+**Why:** Removes boilerplate. You don't need to write separate views for GET, POST, PUT, DELETE.
+**How:** You define a class inheriting from `ModelViewSet`, point it to a queryset and a serializer class, and register it with a `DefaultRouter`.
+**Java equivalent:** `@RestController` combined with Spring Data REST, which auto-generates CRUD endpoints for repositories.
+
+**Interview Q:** *"How do you quickly create a full CRUD API in Django?"*
+**Answer:** Use DRF's `ModelViewSet` and register it with a `DefaultRouter`. It automatically provides all 6 standard REST operations out of the box, which you can customize by overriding methods like `get_queryset()` or `perform_create()`.
+
+---
+
+#### 2. N+1 Query Problem & `select_related()`
+**What:** N+1 is a performance issue where fetching a list of N items causes 1 query for the list, plus N additional queries to fetch a related foreign key (like accessing `contact.company.name` in a loop).
+**Why:** It drastically slows down list views.
+**How:** Use `select_related("foreign_key_field")` in your queryset. This tells Django to perform a SQL `JOIN` and fetch the related object in the same query.
+**Java equivalent:** `@EntityGraph` or `JOIN FETCH` in JPQL.
+
+**Interview Q:** *"What is the N+1 query problem and how do you solve it in Django?"*
+**Answer:** N+1 happens when accessing a related object (like a foreign key) inside a loop, causing a new query for each item. In Django, we solve it using `select_related()` for foreign keys (does a SQL JOIN) or `prefetch_related()` for many-to-many/reverse relations (does one extra query using an IN clause).
+
+---
+
+#### 3. Tenant Data Isolation (Server-Side Injection)
+**What:** In a multi-tenant SaaS, you must guarantee users can't create or read data belonging to another tenant.
+**Why:** Trusting the client to send `{"organization_id": "123"}` is a critical security flaw.
+**How:**
+1.  **Read:** Override `get_queryset()` to `return Company.objects.filter(organization=self.request.user.organization)`.
+2.  **Write:** Override `perform_create(self, serializer)` to inject it: `serializer.save(organization=self.request.user.organization)`.
+**Java equivalent:** Using an interceptor, AOP, or base repository method `findAllByOrganizationId()` where `organizationId` is always pulled from the `SecurityContext`.
+
+**Interview Q:** *"How do you ensure a user cannot create records for a different tenant in a SaaS application?"*
+**Answer:** Never accept the tenant ID (organization ID) from the request payload. Always inject it server-side in the backend logic, pulling it from the authenticated user's context (e.g., overriding `perform_create()` in DRF to use `request.user.organization`).
+
+---
+
+#### 4. Multiple Serializers per ViewSet
+**What:** Using different serializers for different actions within the same ViewSet (e.g., `ContactListSerializer` vs `ContactDetailSerializer`).
+**Why:** Performance and payload size. A list view of 100 contacts doesn't need all 20 fields. A detail view for 1 contact needs everything.
+**How:** Override `get_serializer_class()` in the ViewSet and return a different class based on `self.action` (e.g., if `self.action == 'list'`).
+**Java equivalent:** Using different Jackson `@JsonView` profiles or returning different DTOs (e.g., `ContactSummaryDTO` vs `ContactDetailDTO`).
+
+**Interview Q:** *"How do you return a smaller payload for list views compared to detail views in DRF?"*
+**Answer:** Override the `get_serializer_class()` method in the ViewSet. Return a lightweight serializer if `self.action == 'list'`, and a full serializer otherwise.
+
+---
+
+#### 5. Cross-Tenant ForeignKey Validation
+**What:** Ensuring that when creating a Contact linked to a Company, the provided Company actually belongs to the user's organization.
+**Why:** A user could pass a valid `company_id` that belongs to a different tenant, effectively linking their contact to someone else's company.
+**How:** Implement a `validate_company(self, company)` method on the serializer that checks if `company.organization == request.user.organization`.
+**Java equivalent:** Validating the association in the service layer before saving: `if (!company.getOrganizationId().equals(currentUser.getOrganizationId())) throw new AccessDeniedException();`
+
+**Interview Q:** *"If a user submits a valid foreign key ID in a payload, is it safe to just save it?"*
+**Answer:** No. In a multi-tenant system, you must validate that the referenced foreign key record actually belongs to the current user's tenant before saving. Otherwise, you risk exposing or corrupting data across tenant boundaries.
+
+### Phase 4 Interview Questions (5)
+
+1. What is a `ModelViewSet` in Django REST Framework and what methods does it provide?
+2. What is the N+1 query problem, and how do you solve it for foreign keys in Django?
+3. How do you ensure tenant data isolation when reading and writing data in DRF ViewSets?
+4. How and why would you use multiple serializers in a single ViewSet?
+5. Why is cross-tenant foreign key validation necessary, and where do you implement it in DRF?
