@@ -1,7 +1,7 @@
 # Architecture — CRM Data Quality & Enrichment Platform
 
 > **Living document** — updated after every phase completion.
-> Last updated: Phase 2 — Database Foundation
+> Last updated: Phase 3 — Security Foundation
 
 ---
 
@@ -11,8 +11,8 @@
 |---|---|---|
 | 1 — Local Foundation | ✅ Complete | Django + DRF + PostgreSQL + health endpoints |
 | 2 — Database Foundation | ✅ Complete | Organization, CustomUser, UUID PKs, migrations |
-| 3 — Security Foundation | 🔜 Next | JWT, RBAC, multi-tenancy enforcement |
-| 4 — Core Domain | ⏳ | Companies, Contacts CRUD |
+| 3 — Security Foundation | ✅ Complete | JWT auth, RBAC roles, logout blacklist, tenant isolation |
+| 4 — Core Domain | 🔜 Next | Companies, Contacts CRUD |
 | 5 — PostgreSQL + ORM | ⏳ | Indexes, EXPLAIN, N+1 |
 | 6 — Data Quality | ⏳ | Normalize, validate, deduplicate, score |
 | 7 — Large Data | ⏳ | CSV import, streaming |
@@ -26,7 +26,7 @@
 
 ---
 
-## System Architecture (Current — Phase 2)
+## System Architecture (Current — Phase 3)
 
 ```
 Client (HTTP)
@@ -329,3 +329,121 @@ Contact Input
 | `CELERY_BROKER_URL` | Celery message broker | 8 |
 | `OPENAI_API_KEY` | Optional AI (Phase 11) | 11 |
 | `AWS_*` | Cloud deployment | 14 |
+
+---
+
+## PHASE 3 — Security Foundation (Added)
+
+### New Files Added
+
+```
+accounts/
+├── serializers.py     ← CustomTokenObtainPairSerializer, UserProfileSerializer
+├── views.py           ← LoginView, logout_view, RefreshView, me_view
+├── urls.py            ← auth URL patterns
+└── permissions.py     ← IsAdminRole, IsManagerOrAbove, IsAnalystOrAbove, IsSameOrganization
+
+config/
+└── api_urls.py        ← /api/v1/ central API router
+
+tests/
+└── test_auth.py       ← 19 tests (login, logout, RBAC, tenant isolation)
+```
+
+### API Endpoints (Phase 3)
+
+| Method | URL | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/api/v1/auth/login/` | ❌ Public | Email + password → access + refresh tokens |
+| `POST` | `/api/v1/auth/logout/` | ✅ Bearer | Blacklist refresh token |
+| `POST` | `/api/v1/auth/refresh/` | ❌ Public | Swap refresh → new access token |
+| `GET` | `/api/v1/auth/me/` | ✅ Bearer | Current user profile |
+
+### JWT Flow (Implemented)
+
+```
+Client                          Server
+──────────────────────────────────────────────────────
+POST /auth/login/          →    Validate email + password
+{ email, password }             CustomTokenObtainPairSerializer
+                           ←    { access (60min), refresh (7days), user{} }
+
+GET /auth/me/              →    JWTAuthentication reads Bearer token
+Authorization: Bearer ...       Validates signature + expiry
+                           ←    { id, email, role, org_id, full_name }
+
+POST /auth/refresh/        →    Validate refresh token
+{ refresh }                     Old token blacklisted (ROTATE=True)
+                           ←    { access (new), refresh (new) }
+
+POST /auth/logout/         →    RefreshToken.blacklist()
+{ refresh }                     Token stored in token_blacklist_blacklistedtoken
+                           ←    { message: "Successfully logged out." }
+```
+
+### Custom JWT Payload Claims
+
+```json
+{
+  "token_type": "access",
+  "exp": 1234567890,
+  "user_id": "b33dea29-9c71-4cd9-...",
+  "email": "alice@acme.com",
+  "role": "ADMIN",
+  "first_name": "Alice",
+  "last_name": "Admin",
+  "organization_id": "uuid-of-acme-org"
+}
+```
+Client decodes this (Base64) to know role + org without extra API call.
+The signature (HMAC-SHA256) prevents tampering.
+
+### RBAC Permission Classes (Implemented)
+
+| Class | Allowed Roles | Use On |
+|---|---|---|
+| `IsAdminRole` | ADMIN only | User mgmt, org settings, audit logs |
+| `IsManagerOrAbove` | ADMIN + MANAGER | Company/Contact CRUD, imports |
+| `IsAnalystOrAbove` | All authenticated | Read-only lists, dashboard |
+| `IsSameOrganization` | Object-level check | Any per-object endpoint (IDOR prevention) |
+
+**Usage pattern (Phase 4+):**
+```python
+@api_view(["GET"])
+@permission_classes([IsManagerOrAbove])
+def create_contact(request):
+    ...
+```
+
+**Java equivalent:**
+```java
+@PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+public ResponseEntity<ContactDTO> createContact(...) { ... }
+```
+
+### New Database Tables (Phase 3 — JWT Blacklist)
+
+```
+token_blacklist_outstandingtoken   ← every issued refresh token recorded
+token_blacklist_blacklistedtoken   ← blacklisted (logged-out) tokens
+```
+
+### DRF Global Defaults Set (Phase 3)
+
+```python
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ["JWTAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["IsAuthenticated"],
+    "DEFAULT_RENDERER_CLASSES": ["JSONRenderer"],
+}
+```
+Every endpoint is now authenticated by default. Public endpoints opt out with `permission_classes=[AllowAny]`.
+
+### Test Count After Phase 3
+
+| File | Tests | Covers |
+|---|---|---|
+| `test_health.py` | 8 | Health + readiness endpoints |
+| `test_models.py` | 14 | Organization + User models |
+| `test_auth.py` | 19 | Login, logout, refresh, /me/, RBAC, tenant |
+| **Total** | **41** | |

@@ -2,7 +2,7 @@
 
 > **Living document** — a new section is added after every phase.
 > Use this to prepare for backend engineering interviews.
-> Last updated: Phase 2 — Database Foundation
+> Last updated: Phase 3 — Security Foundation
 
 ---
 
@@ -289,3 +289,200 @@ user.password  # → "pbkdf2_sha256$720000$salt$hash" — never the plain text
 8. How does Django store passwords? What algorithm does it use?
 9. What is the Principle of Least Privilege? How is it applied in our User model?
 10. What is `auto_now_add` vs `auto_now`? When would you use each?
+
+---
+
+---
+
+## PHASE 3 — Security Foundation
+
+### Key Concepts
+
+#### 1. JWT — JSON Web Token
+**What:** A compact, signed token used to prove identity. Three parts: `header.payload.signature`
+**Why:** Stateless — the server doesn't store sessions. The token itself carries all the info needed (user_id, role, expiry). Scales horizontally with no shared state.
+**How:**
+```
+Header:    { "alg": "HS256", "typ": "JWT" }  → Base64 encoded
+Payload:   { "user_id": "uuid", "role": "ADMIN", "exp": 1234 }  → Base64 encoded
+Signature: HMAC_SHA256(header + "." + payload, SECRET_KEY)
+```
+Client sends: `Authorization: Bearer <token>` on every request.
+
+**Java equivalent:** `jjwt` library / Spring Security OAuth2 JWT support
+
+**Interview Q:** *"Can you decode a JWT? Is it encrypted?"*
+**Answer:** Yes, anyone can decode a JWT — it's Base64, not encrypted. But they CANNOT forge one without the SECRET_KEY because the signature would fail verification. Never put sensitive data (passwords, SSNs) in a JWT payload.
+
+---
+
+#### 2. Access Token vs Refresh Token
+**What:**
+- **Access Token:** Short-lived (60 min). Sent with every API request. If stolen, expires soon.
+- **Refresh Token:** Long-lived (7 days). Only sent to `/auth/refresh/`. Used to get a new access token.
+
+**Why two tokens?**
+- If access token was long-lived (7 days) and stolen → attacker has 7 days of access.
+- Short access token + long refresh token gives balance: convenience for users, security for ops.
+
+**Java equivalent:** Same pattern in Spring Security OAuth2 — `access_token` + `refresh_token`
+
+**Interview Q:** *"Why not just use one long-lived JWT?"*
+**Answer:** A stolen long-lived JWT is a 7-day breach. Short access tokens (60 min) limit the damage window. The refresh token has a smaller attack surface — it's only ever sent to one endpoint.
+
+---
+
+#### 3. Token Blacklist (Logout)
+**What:** On logout, the refresh token is recorded in `token_blacklist_blacklistedtoken` table. Any future `/refresh/` attempt with it fails.
+**Why:** JWTs are stateless — you can't "delete" a token. Blacklisting is the only way to explicitly invalidate one.
+**Limitation:** The access token STILL works until it expires (60 min). This is a known JWT trade-off. Mitigation: keep access token lifetime short.
+
+**Tables created:**
+```
+token_blacklist_outstandingtoken  ← every issued refresh token
+token_blacklist_blacklistedtoken  ← tokens that have been blacklisted
+```
+
+**Java equivalent:** A `revoked_tokens` table checked on every token validation.
+
+**Interview Q:** *"How do you implement logout with JWT?"*
+**Answer:** Blacklist the refresh token in the database. The access token remains valid until expiry — this is a known limitation. For stricter security, use very short access token lifetimes (5-15 min) or maintain a token version counter on the user record.
+
+---
+
+#### 4. RBAC — Role-Based Access Control
+**What:** Users are assigned roles (ADMIN, MANAGER, ANALYST). Endpoints check the role before allowing access.
+**Why:** Finer control than just "authenticated vs not". A data entry ANALYST shouldn't delete an organization.
+
+**Our permission class hierarchy:**
+```
+AllowAny           → public (login, health checks)
+IsAnalystOrAbove   → all logged-in users (read-only endpoints)
+IsManagerOrAbove   → ADMIN + MANAGER (write endpoints)
+IsAdminRole        → ADMIN only (user mgmt, system config)
+IsSameOrganization → per-object tenant check (IDOR prevention)
+```
+
+**Java equivalent:**
+```java
+@PreAuthorize("hasRole('ADMIN')")              → IsAdminRole
+@PreAuthorize("hasAnyRole('ADMIN','MANAGER')") → IsManagerOrAbove
+@PreAuthorize("isAuthenticated()")             → IsAnalystOrAbove
+```
+
+**Interview Q:** *"How does DRF permission system work?"*
+**Answer:** Two methods: `has_permission(request, view)` = view-level check (runs for all requests). `has_object_permission(request, view, obj)` = object-level check (runs only when a specific object is fetched). Both must return True for access.
+
+---
+
+#### 5. IDOR — Insecure Direct Object Reference
+**What:** An attacker guesses/enumerates another user's resource ID and accesses it.
+**Example:**
+```
+ACME user calls: GET /api/v1/contacts/some-uuid/
+That UUID belongs to GLOBEX → should return 403, not the contact!
+```
+**Fix:** `IsSameOrganization` permission class checks `obj.organization_id == request.user.organization_id`
+**Why UUID helps:** UUID IDs are not guessable (unlike integer 1, 2, 3...). But UUID alone is not enough — you must also check ownership.
+
+**Java equivalent:** `@PostAuthorize("returnObject.organizationId == principal.organizationId")`
+
+**Interview Q:** *"What is IDOR and how do you prevent it?"*
+**Answer:** IDOR = accessing another user's data via a guessable/known ID. Prevention: 1) Use UUID (not sequential int) PKs, 2) Always check object ownership in permission layer, 3) Scope all querysets to the authenticated user's organization.
+
+---
+
+#### 6. DRF Serializers — Two Roles
+**What:** Serializers handle both directions:
+- **Incoming (Deserialization):** Validate + parse request body → Python object
+- **Outgoing (Serialization):** Python object → JSON response
+
+```python
+# Incoming: like @RequestBody + @Valid in Spring
+serializer = LoginSerializer(data=request.data)
+serializer.is_valid(raise_exception=True)  # validates, raises 400 if invalid
+
+# Outgoing: like Jackson ObjectMapper / DTO
+serializer = UserProfileSerializer(request.user)
+return Response(serializer.data)  # returns JSON
+```
+
+**Java equivalent:**
+- Deserialization: `@RequestBody UserDTO dto` + `@Valid` + Bean Validation
+- Serialization: Jackson `ObjectMapper` / `@JsonProperty` / record DTO
+
+**Interview Q:** *"What is the difference between a Serializer and a ModelSerializer in DRF?"*
+**Answer:** `Serializer` = fully manual, you define every field. `ModelSerializer` = auto-generates fields from a Django model (like Lombok + JPA entity). `ModelSerializer` is 80% of real-world usage. Use plain `Serializer` for non-model data (login requests, analytics responses).
+
+---
+
+#### 7. Custom Token Claims
+**What:** We add extra data to the JWT payload beyond the default `user_id` and `exp`.
+**Why:** The client (React app, mobile) can read the role and org_id from the token without making a separate API call.
+```python
+token["role"] = user.role              # "ADMIN", "MANAGER", "ANALYST"
+token["organization_id"] = str(user.organization_id)
+token["email"] = user.email
+```
+**Security note:** Claims are readable (Base64) but not modifiable (signature-protected).
+
+**Interview Q:** *"What custom claims did you add to the JWT and why?"*
+**Answer:** `role`, `organization_id`, `email`, `first_name`. This avoids the client needing to call `/auth/me/` immediately after login — it already knows who the user is and what they can do from the token itself.
+
+---
+
+#### 8. Token Rotation
+**What:** `ROTATE_REFRESH_TOKENS=True` → every `/auth/refresh/` call issues a NEW refresh token and blacklists the old one.
+**Why:** If a refresh token is stolen, the attacker can only use it once. The moment the legitimate user refreshes, the attacker's copy is blacklisted.
+**Java equivalent:** Refresh token rotation is a standard OAuth2 security recommendation.
+
+**Interview Q:** *"What is refresh token rotation and why is it important?"*
+**Answer:** Issuing a new refresh token on every use and blacklisting the old one. If a token is stolen and used, the server detects two concurrent refresh attempts — one will fail. It also limits the window of any single token's usefulness.
+
+---
+
+#### 9. Default Authentication in DRF
+**What:** Setting `DEFAULT_AUTHENTICATION_CLASSES` and `DEFAULT_PERMISSION_CLASSES` means EVERY view is automatically protected unless it explicitly opts out.
+```python
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ["JWTAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["IsAuthenticated"],
+}
+```
+**Why:** Secure by default — you can't accidentally leave an endpoint public. You must consciously add `permission_classes=[AllowAny]` to make something public.
+
+**Java equivalent:** Spring Security's `.anyRequest().authenticated()` as the catch-all rule at the bottom of the security filter chain.
+
+**Interview Q:** *"How do you secure an endpoint by default in DRF?"*
+**Answer:** Set `DEFAULT_PERMISSION_CLASSES = [IsAuthenticated]` in `REST_FRAMEWORK` settings. Then only endpoints that explicitly set `permission_classes = [AllowAny]` are public. This is "secure by default" — any new endpoint you add is automatically protected.
+
+---
+
+#### 10. DRF APIClient in Tests
+**What:** `APIClient` is DRF's test HTTP client. It makes real HTTP requests through the Django test runner without a real server.
+**How:**
+```python
+client = APIClient()
+# Simulate JWT auth — no need for a real token in tests
+client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+response = client.get("/api/v1/auth/me/")
+```
+**Java equivalent:** `MockMvc` in Spring Boot tests / `TestRestTemplate`
+
+**Interview Q:** *"How do you test authenticated DRF endpoints?"*
+**Answer:** Use `APIClient` from DRF's test package. Call `api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")` to attach a real JWT to all subsequent requests. Or use `api_client.force_authenticate(user=user)` to skip token generation entirely in unit tests.
+
+---
+
+### Phase 3 Interview Questions (10)
+
+1. What is a JWT? What are its three parts? Is the payload encrypted?
+2. What is the difference between an access token and a refresh token? Why do we have both?
+3. How do you implement logout with JWT? What is the limitation?
+4. What is RBAC? How are the permission classes structured in our platform?
+5. What is IDOR? How do you prevent it with UUIDs and object-level permissions?
+6. What is the difference between `has_permission` and `has_object_permission` in DRF?
+7. What is `DEFAULT_PERMISSION_CLASSES` and why is "secure by default" important?
+8. What is refresh token rotation? Why is it a security best practice?
+9. What custom claims did we add to the JWT payload? Why?
+10. What is the Java equivalent of DRF's `APIClient` in tests?
