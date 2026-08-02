@@ -43,7 +43,7 @@ class AuditLogMiddleware(MiddlewareMixin):
     def process_response(self, request, response):
         if request.method not in ('GET', 'HEAD', 'OPTIONS'):
             user = getattr(request, 'user', None)
-            if user and user.is_authenticated and hasattr(user, 'organization'):
+            if user and user.is_authenticated and getattr(user, 'organization', None):
                 action = 'CREATE' if request.method == 'POST' else 'UPDATE' if request.method in ('PUT', 'PATCH') else 'DELETE'
                 
                 # Get IP address
