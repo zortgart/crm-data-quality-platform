@@ -1,7 +1,7 @@
 # Architecture — CRM Data Quality & Enrichment Platform
 
 > **Living document** — updated after every phase completion.
-> Last updated: Phase 4 — Core Domain
+> Last updated: Phase 5 — PostgreSQL + ORM
 
 ---
 
@@ -13,8 +13,8 @@
 | 2 — Database Foundation | ✅ Complete | Organization, CustomUser, UUID PKs, migrations |
 | 3 — Security Foundation | ✅ Complete | JWT auth, RBAC roles, logout blacklist, tenant isolation |
 | 4 — Core Domain | ✅ Complete | Companies, Contacts CRUD |
-| 5 — PostgreSQL + ORM | 🔜 Next | Indexes, EXPLAIN, N+1 |
-| 6 — Data Quality | ⏳ | Normalize, validate, deduplicate, score |
+| 5 — PostgreSQL + ORM | ✅ Complete | Indexes, EXPLAIN, N+1 |
+| 6 — Data Quality | 🔜 Next | Normalize, validate, deduplicate, score |
 | 7 — Large Data | ⏳ | CSV import, streaming |
 | 8 — Background Processing | ⏳ | Celery + Redis |
 | 9 — Enterprise Features | ⏳ | Audit, caching, observability |
@@ -508,4 +508,27 @@ tests/
 | `test_auth.py` | 19 | Login, logout, refresh, /me/, RBAC, tenant |
 | `test_companies.py` | 5 | Companies CRUD, RBAC, isolation |
 | `test_contacts.py` | 3 | Contacts CRUD, cross-tenant validation |
-| **Total** | **49** | |
+| `test_performance.py` | 1 | N+1 query prevention (select_related) |
+| **Total** | **50** | |
+
+---
+
+## PHASE 5 — PostgreSQL + ORM (Added)
+
+### Database Optimizations
+
+**N+1 Query Prevention:**
+Verified that fetching a list of Contacts does not generate a separate query for each contact's Company or Organization. Achieved using Django's `select_related()` and validated via `CaptureQueriesContext` in `tests/test_performance.py`.
+
+**PostgreSQL Indexes Added:**
+1. `idx_contacts_org_name`: Composite index `(organization_id, last_name, first_name)` for fast sorting of a tenant's contact list.
+2. `idx_contacts_quality`: Single index on `(quality_score)` for dashboard aggregations.
+3. `idx_contacts_org_created`: Composite index on `(organization_id, created_at)` for time-series lookups.
+Note: Django automatically creates an index for any `ForeignKey` (e.g., `organization_id`), so base tenant isolation queries are already indexed.
+
+### Performance Testing Utilities
+- `common/management/commands/generate_mock_data.py`: CLI tool to generate 10,000+ synthetic contacts and 50+ companies in seconds using `bulk_create`.
+- `common/management/commands/explain_queries.py`: CLI tool to run and print PostgreSQL's `EXPLAIN ANALYZE` for typical ORM queries.
+
+### Test Count After Phase 5
+Total tests: **50** (Added `test_performance.py`)

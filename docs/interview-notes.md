@@ -2,7 +2,7 @@
 
 > **Living document** — a new section is added after every phase.
 > Use this to prepare for backend engineering interviews.
-> Last updated: Phase 4 — Core Domain
+> Last updated: Phase 5 — PostgreSQL + ORM
 
 ---
 
@@ -555,5 +555,61 @@ response = client.get("/api/v1/auth/me/")
 1. What is a `ModelViewSet` in Django REST Framework and what methods does it provide?
 2. What is the N+1 query problem, and how do you solve it for foreign keys in Django?
 3. How do you ensure tenant data isolation when reading and writing data in DRF ViewSets?
-4. How and why would you use multiple serializers in a single ViewSet?
 5. Why is cross-tenant foreign key validation necessary, and where do you implement it in DRF?
+
+---
+
+---
+
+## PHASE 5 — PostgreSQL + ORM
+
+### Key Concepts
+
+#### 1. EXPLAIN ANALYZE
+**What:** A PostgreSQL command that executes a query and returns the actual execution plan (cost, time, index usage).
+**Why:** To diagnose slow queries and verify that your indexes are actually being used by the database optimizer.
+**How:** In Django, you can call `.explain(analyze=True)` on a queryset.
+**Java equivalent:** Prefixing a JPQL or native query with `EXPLAIN ANALYZE` in pgAdmin, or using a tool like `hypersistence-optimizer`.
+
+**Interview Q:** *"How do you verify if a database index is being used by your Django query?"*
+**Answer:** I generate the queryset and call `.explain(analyze=True)` on it. This tells PostgreSQL to execute the query and return the execution plan, showing whether it performed a 'Seq Scan' (full table scan) or an 'Index Scan' / 'Bitmap Index Scan'.
+
+---
+
+#### 2. Sequential Scan vs. Index Scan
+**What:** 
+- **Sequential Scan (Seq Scan):** The database reads the entire table from top to bottom.
+- **Index Scan:** The database traverses a B-Tree index to quickly find the exact row pointers.
+**Why:** Sequential scans are bad for large tables (O(N)), but sometimes chosen by PostgreSQL for very small tables or queries that return a large percentage of the table.
+
+**Interview Q:** *"I added an index to a column, but EXPLAIN ANALYZE shows a Sequential Scan. Why?"*
+**Answer:** The PostgreSQL query planner might decide a sequential scan is faster if the table is very small, or if your query condition (e.g., `score >= 0`) returns a large percentage of the rows in the table. In those cases, reading sequential disk blocks is cheaper than traversing the index and doing random I/O.
+
+---
+
+#### 3. Composite Indexes
+**What:** An index created on multiple columns (e.g., `organization_id` + `last_name`).
+**Why:** To optimize queries that filter by one column and sort/filter by another.
+**How:** `models.Index(fields=["organization", "last_name"])` in Django's `Meta` class.
+**Java equivalent:** `@Table(indexes = { @Index(name = "idx", columnList = "organization_id, last_name") })` in JPA/Hibernate.
+
+**Interview Q:** *"If you have a multi-tenant app where you frequently list users by tenant, ordered by last name, what index would you create?"*
+**Answer:** I would create a composite index on `(tenant_id, last_name)`. A single-column index on `tenant_id` would still require an in-memory sort for the last name. The composite index allows the database to instantly retrieve the records already sorted.
+
+---
+
+#### 4. Bulk Create (`bulk_create`)
+**What:** An ORM method to insert multiple objects into the database in a single SQL query.
+**Why:** Calling `.save()` in a loop of 10,000 items creates 10,000 separate `INSERT` statements, which is extremely slow due to network/transaction overhead.
+**How:** Instantiate model objects in memory, append to a list, and call `Model.objects.bulk_create(list_of_objects, batch_size=5000)`.
+**Java equivalent:** Hibernate JDBC batching (`spring.jpa.properties.hibernate.jdbc.batch_size=500`) + calling `saveAll()`.
+
+**Interview Q:** *"How do you insert 10,000 rows into a database using an ORM efficiently?"*
+**Answer:** You should never call `.save()` in a loop. You instantiate the objects in memory and use `bulk_create` (or `saveAll` in Java) with a `batch_size` to chunk the inserts. This reduces 10,000 SQL queries down to a small handful of large `INSERT` statements.
+
+### Phase 5 Interview Questions (4)
+
+1. How do you find out if a query is slow in PostgreSQL?
+2. What is the difference between an Index Scan and a Sequential Scan?
+3. When should you use a composite index instead of multiple single-column indexes?
+4. How do you efficiently load thousands of records into the database?

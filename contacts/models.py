@@ -110,6 +110,10 @@ class Contact(UUIDModel, TimeStampedModel):
             # Multi-column index: most queries filter by org first, then order by name
             models.Index(fields=["organization", "last_name", "first_name"],
                          name="idx_contacts_org_name"),
+            # Dashboard aggregations (Phase 5)
+            models.Index(fields=["quality_score"], name="idx_contacts_quality"),
+            # Time-based sorting within an org (Phase 5)
+            models.Index(fields=["organization", "created_at"], name="idx_contacts_org_created"),
         ]
 
     def __str__(self):
