@@ -15,7 +15,7 @@ from rest_framework.parsers import MultiPartParser
 from accounts.permissions import IsManagerOrAbove, IsAnalystOrAbove
 from .models import ImportJob, ImportRow
 from .serializers import ImportJobSerializer, ImportRowSerializer
-from .processor import process_csv_import
+from .tasks import process_csv_import_task
 
 
 class ImportJobViewSet(viewsets.ReadOnlyModelViewSet):
@@ -51,27 +51,19 @@ class ImportJobViewSet(viewsets.ReadOnlyModelViewSet):
         if not csv_file.name.endswith('.csv'):
             return Response({"error": "File must be a CSV"}, status=status.HTTP_400_BAD_REQUEST)
             
-        # 1. Create Job Tracker
+        # 1. Create Job Tracker and attach file
         job = ImportJob.objects.create(
             organization=request.user.organization,
             created_by=request.user,
-            filename=csv_file.name
+            filename=csv_file.name,
+            file=csv_file
         )
         
-        # 2. Process file in memory (Synchronous for Phase 7)
-        # Note: In production, we decode in chunks or save the file to S3 first.
-        # Here we decode the memory-uploaded file into a text stream.
-        try:
-            # We assume utf-8. Python's csv module needs text mode.
-            text_stream = io.StringIO(csv_file.read().decode('utf-8'))
-            process_csv_import(job, text_stream)
-        except UnicodeDecodeError:
-            job.status = "FAILED"
-            job.error_message = "File is not valid UTF-8"
-            job.save()
-            return Response({"error": "File is not valid UTF-8"}, status=status.HTTP_400_BAD_REQUEST)
+        # 2. Dispatch background task to Celery
+        # .delay() is shorthand for .apply_async()
+        process_csv_import_task.delay(str(job.id))
             
-        # Return the job status
+        # Return 201 immediately while processing happens in background
         job.refresh_from_db()
         serializer = self.get_serializer(job)
         return Response(serializer.data, status=status.HTTP_201_CREATED)

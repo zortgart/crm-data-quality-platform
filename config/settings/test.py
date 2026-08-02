@@ -26,10 +26,16 @@ DATABASES = {
 }
 
 # Faster password hashing in tests (MD5 vs PBKDF2)
-# Security is NOT needed in test environment
+# Security# Disable password hashing overhead for faster tests
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.MD5PasswordHasher",
 ]
+
+# Run Celery tasks synchronously in tests
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_STORE_EAGER_RESULT = True
+CELERY_BROKER_URL = "memory://"
+CELERY_RESULT_BACKEND = "cache+memory://"
 
 # Suppress SQL logging during tests for cleaner output
 LOGGING["loggers"]["django.db.backends"]["level"] = "WARNING"  # noqa: F405

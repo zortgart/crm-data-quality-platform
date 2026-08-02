@@ -37,6 +37,7 @@ class ImportJob(UUIDModel, TimeStampedModel):
     )
 
     filename = models.CharField(max_length=255)
+    file = models.FileField(upload_to="imports/", null=True, blank=True)
     status = models.CharField(
         max_length=20, 
         choices=ImportStatus.choices, 

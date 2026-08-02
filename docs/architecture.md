@@ -1,7 +1,7 @@
 # Architecture — CRM Data Quality & Enrichment Platform
 
 > **Living document** — updated after every phase completion.
-> Last updated: Phase 7 — Large Data
+> Last updated: Phase 8 — Background Processing
 
 ---
 
@@ -16,8 +16,8 @@
 | 5 — PostgreSQL + ORM | ✅ Complete | Indexes, EXPLAIN, N+1 |
 | 6 — Data Quality | ✅ Complete | Normalize, validate, deduplicate, score |
 | 7 — Large Data | ✅ Complete | CSV import, streaming |
-| 8 — Background Processing | 🔜 Next | Celery + Redis |
-| 9 — Enterprise Features | ⏳ | Audit, caching, observability |
+| 8 — Background Processing | ✅ Complete | Celery + Redis |
+| 9 — Enterprise Features | 🔜 Next | Audit, caching, observability |
 | 10 — Testing + Performance | ⏳ | 1M row benchmarks |
 | 11 — Optional AI | ⏳ | AI provider abstraction |
 | 12 — Docker | ⏳ | Containerization |
@@ -537,6 +537,29 @@ Handling large CSV uploads without memory exhaustion (OOM) required streaming th
 
 ### Test Count After Phase 7
 Total tests: **64** (Added `test_imports.py` covering success, failure, missing headers, and RBAC).
+
+---
+
+## PHASE 8 — Background Processing (Added)
+
+### Celery Worker Architecture
+
+To prevent HTTP requests from hanging and timing out during large CSV uploads, processing was moved to a background worker.
+
+1. **Celery Setup (`config/celery.py`):**
+   - Configured Celery application linked to Django settings (`CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`).
+   - Relies on Redis as the message broker.
+
+2. **Asynchronous Task (`imports/tasks.py`):**
+   - `process_csv_import_task`: A `@shared_task` that retrieves the `ImportJob` by ID, opens the attached `FileField`, and invokes the synchronous `process_csv_import` processor.
+   - The CSV parser now reads from `io.TextIOWrapper` mapped over the physical file rather than a memory stream.
+
+3. **API Decoupling (`imports/views.py`):**
+   - The `/api/v1/imports/` POST endpoint now saves the uploaded file to disk and dispatches `.delay(job.id)`.
+   - Returns a `201 Created` immediately with a status of `PENDING`, allowing the frontend to poll for completion.
+
+4. **Testing Eager Mode (`config/settings/test.py`):**
+   - `CELERY_TASK_ALWAYS_EAGER = True` forces Celery tasks to execute synchronously during tests, avoiding the need for a running Redis broker in CI/CD pipelines while preserving the same code paths.
 
 ---
 

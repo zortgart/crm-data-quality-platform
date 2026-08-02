@@ -153,11 +153,27 @@ TIME_ZONE = "UTC"          # Always UTC in backend — convert in client
 USE_I18N = True
 USE_TZ = True              # CRITICAL: always use timezone-aware datetimes
 
+# CORS settings (Phase 3)
+CORS_ALLOW_ALL_ORIGINS = True # For local development
+CORS_ALLOW_CREDENTIALS = True
+
+# Celery Configuration (Phase 8)
+# We default to memory/dummy for local tests if redis isn't present, but expect redis
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default="redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE              # CRITICAL: always use timezone-aware datetimes
+
 # =============================================================
 # STATIC FILES
 # =============================================================
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 # =============================================================
 # DEFAULT PRIMARY KEY

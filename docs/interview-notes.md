@@ -2,7 +2,7 @@
 
 > **Living document** — a new section is added after every phase.
 > Use this to prepare for backend engineering interviews.
-> Last updated: Phase 7 — Large Data
+> Last updated: Phase 8 — Background Processing
 
 ---
 
@@ -706,3 +706,34 @@ response = client.get("/api/v1/auth/me/")
 1. How do you prevent a Python/Java application from running out of memory when parsing a huge file?
 2. What is "chunking" in the context of database transactions?
 3. How do you design an import system that doesn't completely fail when encountering a single bad row of data?
+
+---
+
+---
+
+## PHASE 8 — Background Processing (Celery)
+
+### Key Concepts
+
+#### 1. The Broker / Worker Pattern
+**What:** Decoupling a long-running task from the main HTTP request thread. The web server sends a message to a "Broker" (Redis/RabbitMQ), and a separate "Worker" (Celery process) picks it up and runs it.
+**Why:** HTTP requests are meant to be fast (completed in < 500ms). If an HTTP request takes 5 minutes to parse a CSV, the user's browser will time out, the load balancer will drop the connection, and server threads will be exhausted.
+**How:** We integrated Celery and Redis. The DRF ViewSet saves the file to disk and calls `task.delay()`. The API immediately returns `201 Created` with a `status="PENDING"`. The frontend can then poll the API to update a progress bar.
+**Java equivalent:** Spring `@Async` (simple threads), or a JMS queue (ActiveMQ / RabbitMQ) with a `@JmsListener` worker.
+
+**Interview Q:** *"A user clicks 'Generate 100-page PDF report' and the API takes 2 minutes to respond, causing timeouts. How do you fix this?"*
+**Answer:** I would implement the Broker/Worker pattern using Celery and Redis (or RabbitMQ). The API should immediately return a `202 Accepted` or `201 Created` with a `job_id`. The actual PDF generation happens asynchronously in a background Celery worker. The frontend can then poll a `/status/{job_id}` endpoint or receive a WebSocket notification when the PDF is ready.
+
+#### 2. Eager Testing Mode
+**What:** Running background tasks synchronously during unit tests.
+**Why:** Unit testing asynchronous message queues is difficult and flaky. You don't want to require Redis to be running in your CI/CD pipeline just to run basic unit tests.
+**How:** Setting `CELERY_TASK_ALWAYS_EAGER = True` in Django settings forces `.delay()` to execute immediately in the same thread.
+**Java equivalent:** Using `SyncTaskExecutor` instead of `ThreadPoolTaskExecutor` in Spring test configurations.
+
+**Interview Q:** *"If you move your logic into an asynchronous queue, how do you unit test it without making your test suite slow and flaky?"*
+**Answer:** In development/testing, message queues usually have an 'eager' or 'synchronous' mode. In Django with Celery, I set `CELERY_TASK_ALWAYS_EAGER = True` in my test settings. This causes `.delay()` calls to execute synchronously in the same thread, allowing me to write standard, deterministic assertions without needing a running Redis instance or `time.sleep()`.
+
+### Phase 8 Interview Questions (2)
+
+1. Explain the Broker / Worker pattern and why it's necessary for web applications.
+2. How do you handle unit testing for code that runs asynchronously in a background worker?
