@@ -20,19 +20,19 @@ from django.urls import path, include
 
 urlpatterns = [
     # Django admin — useful for exploring data during development
-    # Phase 3: we will restrict this or add custom admin
     path("admin/", admin.site.urls),
 
     # =========================================================
-    # Health / Readiness Checks
-    # Phase 1: liveness + readiness
-    # These are unauthenticated by design — load balancers call them.
+    # Health / Readiness Checks (Phase 1) — unauthenticated
     # =========================================================
     path("", include("common.urls")),
 
     # =========================================================
-    # API v1 — All application endpoints live under /api/v1/
-    # Added phase by phase:
-    # path("api/v1/", include("config.api_urls")),
+    # API v1 — All application endpoints
+    # /api/v1/auth/login/
+    # /api/v1/auth/me/
+    # /api/v1/companies/   (Phase 4)
+    # /api/v1/contacts/    (Phase 4)
     # =========================================================
+    path("api/v1/", include("config.api_urls")),
 ]

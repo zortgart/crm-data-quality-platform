@@ -8,6 +8,11 @@
 Django>=5.2,<6.0
 djangorestframework==3.15.2
 
+# JWT Authentication (Phase 3)
+# Simple, well-maintained JWT for DRF. Used by thousands of Django APIs.
+# Java equivalent: jjwt / spring-security-oauth2-jose
+djangorestframework-simplejwt==5.3.1
+
 # PostgreSQL adapter (psycopg v3 — modern, async-capable)
 # psycopg[binary] includes compiled C extensions for performance
 psycopg[binary]>=3.2.10

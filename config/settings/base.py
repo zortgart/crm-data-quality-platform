@@ -38,7 +38,10 @@ DJANGO_APPS = [
 ]
 
 THIRD_PARTY_APPS = [
-    "rest_framework",  # Django REST Framework
+    "rest_framework",                            # Django REST Framework
+    "rest_framework_simplejwt",                  # JWT authentication (Phase 3)
+    "rest_framework_simplejwt.token_blacklist",  # Token blacklist for logout
+    # Phase 9+: django_filters, django_ratelimit
 ]
 
 LOCAL_APPS = [
@@ -156,18 +159,70 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # =============================================================
-# DJANGO REST FRAMEWORK — base configuration
-# Full config added in Phase 3 (auth) and Phase 4 (pagination)
+# DJANGO REST FRAMEWORK
+# Phase 3: JWT authentication + IsAuthenticated by default
+# Phase 4: pagination
+# Phase 9: throttling (rate limiting)
+#
+# Java equivalent: Spring Security's HttpSecurity config
 # =============================================================
 REST_FRAMEWORK = {
-    # Return JSON by default; disable browsable API HTML in production
+    # Every API call must include Authorization: Bearer <token>
+    # UNLESS the view explicitly sets permission_classes=[AllowAny]
+    # Java equivalent: .authorizeHttpRequests().anyRequest().authenticated()
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    # Return JSON always; no browsable HTML API in responses
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
-    # Phase 3: add DEFAULT_AUTHENTICATION_CLASSES (JWT)
-    # Phase 3: add DEFAULT_PERMISSION_CLASSES (IsAuthenticated)
-    # Phase 4: add DEFAULT_PAGINATION_CLASS
-    # Phase 9: add DEFAULT_THROTTLE_CLASSES (rate limiting)
+    # Phase 4: pagination
+    # "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    # "PAGE_SIZE": 20,
+    # Phase 9: throttling
+    # "DEFAULT_THROTTLE_CLASSES": [...],
+}
+
+# =============================================================
+# JWT CONFIGURATION (djangorestframework-simplejwt)
+# =============================================================
+# Java equivalent: JwtProperties / JwtTokenProvider in Spring Security
+# =============================================================
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    # Access token: short-lived. Sent with every API request.
+    # If stolen, attacker can use it for at most 60 minutes.
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+
+    # Refresh token: long-lived. Only sent to /auth/refresh/ endpoint.
+    # Stored securely by the client (e.g. httpOnly cookie in production).
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+
+    # On each /refresh/ call, issue a new refresh token and
+    # blacklist the old one. Prevents refresh token reuse.
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+
+    # JWT algorithm: HMAC-SHA256 (symmetric)
+    # Production upgrade option: RS256 (asymmetric, separate sign/verify keys)
+    "ALGORITHM": "HS256",
+
+    # Authorization: Bearer <token>
+    "AUTH_HEADER_TYPES": ("Bearer",),
+
+    # Which User field is embedded in the token payload
+    # Our User uses UUID id, not integer
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
+
+    # Custom claims added to the token payload
+    # We'll inject role + organization_id in Phase 3 token serializer
+    "TOKEN_OBTAIN_SERIALIZER": "accounts.serializers.CustomTokenObtainPairSerializer",
 }
 
 # =============================================================
