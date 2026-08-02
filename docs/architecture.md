@@ -1,7 +1,7 @@
 # Architecture — CRM Data Quality & Enrichment Platform
 
 > **Living document** — updated after every phase completion.
-> Last updated: Phase 5 — PostgreSQL + ORM
+> Last updated: Phase 6 — Data Quality
 
 ---
 
@@ -14,8 +14,8 @@
 | 3 — Security Foundation | ✅ Complete | JWT auth, RBAC roles, logout blacklist, tenant isolation |
 | 4 — Core Domain | ✅ Complete | Companies, Contacts CRUD |
 | 5 — PostgreSQL + ORM | ✅ Complete | Indexes, EXPLAIN, N+1 |
-| 6 — Data Quality | 🔜 Next | Normalize, validate, deduplicate, score |
-| 7 — Large Data | ⏳ | CSV import, streaming |
+| 6 — Data Quality | ✅ Complete | Normalize, validate, deduplicate, score |
+| 7 — Large Data | 🔜 Next | CSV import, streaming |
 | 8 — Background Processing | ⏳ | Celery + Redis |
 | 9 — Enterprise Features | ⏳ | Audit, caching, observability |
 | 10 — Testing + Performance | ⏳ | 1M row benchmarks |
@@ -509,7 +509,36 @@ tests/
 | `test_companies.py` | 5 | Companies CRUD, RBAC, isolation |
 | `test_contacts.py` | 3 | Contacts CRUD, cross-tenant validation |
 | `test_performance.py` | 1 | N+1 query prevention (select_related) |
-| **Total** | **50** | |
+| `test_validation.py` | 10 | Normalizers, Quality Score, Duplicate Detector, Integration |
+| **Total** | **60** | |
+
+---
+
+## PHASE 6 — Data Quality (Added)
+
+### Pipeline Architecture
+
+When a `Contact` is created or updated via the API, `ContactViewSet` triggers a 3-step synchronous pipeline before returning the response:
+
+1. **Normalization:**
+   - **Email:** Lowercased, stripped.
+   - **Phone:** Parsed to E.164 standard using Google's `phonenumbers` library.
+   - **Company Name:** Stripped of common legal suffixes (e.g. "Inc.", "Corp.") and lowercased.
+   - **Job Title:** Common abbreviations expanded ("Sr. Eng." → "Senior Engineer").
+2. **Quality Scoring:**
+   - A `quality_score` (0-100) is dynamically computed based on data completeness (Valid Email: +30, Valid Phone: +20, Has Company: +20, First/Last Name: +20, Job Title: +10).
+3. **Duplicate Detection:**
+   - Evaluates the new/updated contact against all other contacts in the same organization.
+   - Creates `DuplicatePair` records using `bulk_create(ignore_conflicts=True)` with different confidence tiers:
+     - **L1 (100%):** Exact normalized email match.
+     - **L2 (80%):** Exact normalized phone match.
+     - **L3 (60%):** Exact normalized name + company match.
+
+### New Models
+- `DuplicatePair`: Tracks flagged duplicates. Uses `unique_together` for `(contact_a, contact_b)`.
+
+### Test Count After Phase 6
+Total tests: **60** (Added `test_validation.py` with 10 unit and integration tests)
 
 ---
 

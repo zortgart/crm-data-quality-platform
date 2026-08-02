@@ -4,6 +4,9 @@
 
 from rest_framework import viewsets, filters
 from accounts.permissions import IsManagerOrAbove, IsAnalystOrAbove
+from validation.normalizers import normalize_email, normalize_phone, normalize_job_title
+from validation.quality_scorer import calculate_quality_score
+from validation.duplicate_detector import detect_duplicates
 from .models import Contact
 from .serializers import ContactListSerializer, ContactDetailSerializer
 
@@ -55,9 +58,35 @@ class ContactViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def perform_create(self, serializer):
-        """Organization always injected from token — never from request body."""
-        serializer.save(organization=self.request.user.organization)
+        """
+        1. Inject organization.
+        2. Normalize data.
+        3. Save contact.
+        4. Calculate quality score (requires saved object or field access).
+        5. Run duplicate detection (requires saved object ID).
+        """
+        contact = serializer.save(organization=self.request.user.organization)
+        self._run_quality_pipeline(contact)
 
     def perform_update(self, serializer):
-        """Prevent org from being changed on update."""
-        serializer.save(organization=self.request.user.organization)
+        """Prevent org from being changed on update, and re-run pipeline."""
+        contact = serializer.save(organization=self.request.user.organization)
+        self._run_quality_pipeline(contact)
+
+    def _run_quality_pipeline(self, contact):
+        """
+        Executes the Phase 6 data quality pipeline.
+        """
+        # 1. Normalization
+        contact.normalized_email = normalize_email(contact.email)
+        contact.normalized_phone = normalize_phone(contact.phone)
+        contact.job_title = normalize_job_title(contact.job_title)
+        
+        # 2. Quality Scoring
+        contact.quality_score = calculate_quality_score(contact)
+        
+        # Save updates to the DB
+        contact.save(update_fields=["normalized_email", "normalized_phone", "job_title", "quality_score"])
+        
+        # 3. Duplicate Detection
+        detect_duplicates(contact)

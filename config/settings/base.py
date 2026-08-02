@@ -53,7 +53,9 @@ LOCAL_APPS = [
     # Phase 4: Core Domain
     "companies",
     "contacts",
-    # Phase 5+: imports, audit, enrichment, validation
+    # Phase 6: Data Quality
+    "validation",
+    # Phase 7+: imports, audit, enrichment
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

@@ -20,3 +20,6 @@ psycopg[binary]>=3.2.10
 # Environment variable management
 # Reads from .env file and provides typed access
 python-decouple==3.8
+
+# Data Quality (Phase 6)
+phonenumbers==8.13.39

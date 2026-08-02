@@ -2,7 +2,7 @@
 
 > **Living document** — a new section is added after every phase.
 > Use this to prepare for backend engineering interviews.
-> Last updated: Phase 5 — PostgreSQL + ORM
+> Last updated: Phase 6 — Data Quality
 
 ---
 
@@ -613,3 +613,56 @@ response = client.get("/api/v1/auth/me/")
 2. What is the difference between an Index Scan and a Sequential Scan?
 3. When should you use a composite index instead of multiple single-column indexes?
 4. How do you efficiently load thousands of records into the database?
+
+---
+
+---
+
+## PHASE 6 — Data Quality
+
+### Key Concepts
+
+#### 1. Data Normalization
+**What:** The process of cleaning and standardizing data formats before it is saved (e.g., lowercasing emails, expanding "Sr." to "Senior").
+**Why:** It is required for accurate duplicate detection and searching. You cannot reliably find duplicates if one record has "john@acme.com" and the other has "John@Acme.com ".
+**How:** We intercept the saving process in `perform_create` and `perform_update` inside DRF ViewSets, passing fields through normalizer functions before calling `save()`.
+**Java equivalent:** Pre-persist hooks (`@PrePersist`) in JPA, or custom Jackson deserializers, or cleaning data inside the Service layer before calling `repository.save()`.
+
+**Interview Q:** *"How do you handle dirty data like inconsistent casing in emails?"*
+**Answer:** I build normalizers that run right before the data is saved to the database. For emails, I strip whitespace and lowercase them. I save both the original email (for display) and a `normalized_email` field specifically used for duplicate detection and fast lookups.
+
+#### 2. E.164 Phone Format
+**What:** The international standard for phone numbers (e.g., `+14155552671`), ensuring global uniqueness.
+**Why:** Phone numbers come in hundreds of different formats. Normalizing to E.164 allows for exact duplicate detection.
+**How:** Using Google's `phonenumbers` library (`pip install phonenumbers`), we parse the string and reformat it to `PhoneNumberFormat.E164`.
+
+**Interview Q:** *"How would you detect if two differently formatted phone numbers are the same?"*
+**Answer:** I would never try to write my own regex for that. I would use the standard Google `phonenumbers` library to parse both inputs and format them both into the E.164 standard. If the resulting E.164 strings match, they are the same phone number.
+
+#### 3. Duplicate Detection Tiers (L1/L2/L3)
+**What:** Finding duplicates using different fallback strategies with varying levels of confidence.
+**Why:** Not all duplicates are obvious exact matches.
+**How:** 
+- L1 (100%): Exact match on normalized email.
+- L2 (80%): Exact match on normalized phone.
+- L3 (60%): Exact match on normalized First Name + Last Name + Company ID.
+**Java equivalent:** Using a rules engine or cascading repository queries in a domain service.
+
+**Interview Q:** *"How do you identify duplicate user records in a database?"*
+**Answer:** I implement a tiered approach. First, I look for a high-confidence match like an exact normalized email match. If that fails, I drop to a medium-confidence match, like a normalized phone number. Finally, I use a lower-confidence heuristic, like matching the exact first name, last name, and company.
+
+#### 4. Upserting / Ignoring Conflicts (`ignore_conflicts=True`)
+**What:** Inserting records into a database while gracefully ignoring records that violate a unique constraint.
+**Why:** When detecting duplicates, we might find a duplicate pair `(Contact A, Contact B)` that we already flagged previously. We don't want the database to throw an `IntegrityError`.
+**How:** We use Django's `bulk_create(objects, ignore_conflicts=True)`.
+**Java equivalent:** `INSERT ON CONFLICT DO NOTHING` native queries, or handling `DataIntegrityViolationException`.
+
+**Interview Q:** *"If you try to insert 100 records and 1 of them violates a unique constraint, the whole transaction fails. How do you bypass this?"*
+**Answer:** In Django, I use `bulk_create` with the `ignore_conflicts=True` flag. This translates to an `INSERT ... ON CONFLICT DO NOTHING` statement in PostgreSQL, allowing the 99 valid records to be inserted while silently skipping the 1 duplicate.
+
+### Phase 6 Interview Questions (4)
+
+1. Why is data normalization important before doing deduplication?
+2. What is the E.164 format and why is it used?
+3. How do you design a system to catch duplicates when data might be missing (e.g., no email)?
+4. How do you insert multiple records and ignore ones that violate unique constraints?
