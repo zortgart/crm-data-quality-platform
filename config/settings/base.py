@@ -55,7 +55,9 @@ LOCAL_APPS = [
     "contacts",
     # Phase 6: Data Quality
     "validation",
-    # Phase 7+: imports, audit, enrichment
+    # Phase 7: Large Data
+    "imports",
+    # Phase 8+: audit, enrichment
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

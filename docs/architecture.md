@@ -1,7 +1,7 @@
 # Architecture — CRM Data Quality & Enrichment Platform
 
 > **Living document** — updated after every phase completion.
-> Last updated: Phase 6 — Data Quality
+> Last updated: Phase 7 — Large Data
 
 ---
 
@@ -15,8 +15,8 @@
 | 4 — Core Domain | ✅ Complete | Companies, Contacts CRUD |
 | 5 — PostgreSQL + ORM | ✅ Complete | Indexes, EXPLAIN, N+1 |
 | 6 — Data Quality | ✅ Complete | Normalize, validate, deduplicate, score |
-| 7 — Large Data | 🔜 Next | CSV import, streaming |
-| 8 — Background Processing | ⏳ | Celery + Redis |
+| 7 — Large Data | ✅ Complete | CSV import, streaming |
+| 8 — Background Processing | 🔜 Next | Celery + Redis |
 | 9 — Enterprise Features | ⏳ | Audit, caching, observability |
 | 10 — Testing + Performance | ⏳ | 1M row benchmarks |
 | 11 — Optional AI | ⏳ | AI provider abstraction |
@@ -510,7 +510,33 @@ tests/
 | `test_contacts.py` | 3 | Contacts CRUD, cross-tenant validation |
 | `test_performance.py` | 1 | N+1 query prevention (select_related) |
 | `test_validation.py` | 10 | Normalizers, Quality Score, Duplicate Detector, Integration |
-| **Total** | **60** | |
+| `test_imports.py` | 4 | CSV streaming, chunking, row errors, RBAC |
+| **Total** | **64** | |
+
+---
+
+## PHASE 7 — Large Data (Added)
+
+### Chunked CSV Processing Architecture
+
+Handling large CSV uploads without memory exhaustion (OOM) required streaming the file rather than loading it into RAM.
+
+1. **Models:**
+   - `ImportJob`: Tracks the overall progress (total_rows, processed, failed, status) of a file upload.
+   - `ImportRow`: Tracks individual validation errors (stores the row number, raw JSON data, and the specific validation error dictionary).
+
+2. **Endpoints:**
+   - `POST /api/v1/imports/`: Accepts a `multipart/form-data` file. Streams it via `io.StringIO` and passes it to the processor.
+   - `GET /api/v1/imports/{id}/errors/`: Paginated list of row-level errors for a specific job.
+
+3. **Processor (`imports/processor.py`):**
+   - **Streaming:** Uses `csv.DictReader(stream)` to read one line at a time.
+   - **Chunking:** Groups rows into batches (e.g., 500 rows).
+   - **Validation Reusability:** Uses the *exact same* `ContactDetailSerializer` and Phase 6 `normalizers` used by the REST API to validate each row.
+   - **Atomic Writes:** Saves valid contacts via `bulk_create(ignore_conflicts=True)` and errors via `ImportRow.bulk_create()` inside a single `transaction.atomic()` block per chunk.
+
+### Test Count After Phase 7
+Total tests: **64** (Added `test_imports.py` covering success, failure, missing headers, and RBAC).
 
 ---
 

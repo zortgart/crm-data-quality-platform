@@ -2,7 +2,7 @@
 
 > **Living document** — a new section is added after every phase.
 > Use this to prepare for backend engineering interviews.
-> Last updated: Phase 6 — Data Quality
+> Last updated: Phase 7 — Large Data
 
 ---
 
@@ -666,3 +666,43 @@ response = client.get("/api/v1/auth/me/")
 2. What is the E.164 format and why is it used?
 3. How do you design a system to catch duplicates when data might be missing (e.g., no email)?
 4. How do you insert multiple records and ignore ones that violate unique constraints?
+
+---
+
+---
+
+## PHASE 7 — Large Data (Imports)
+
+### Key Concepts
+
+#### 1. Preventing Out-Of-Memory (OOM) Errors
+**What:** The practice of processing data sequentially rather than loading it all into memory at once.
+**Why:** If a user uploads a 500MB CSV file with 2 million rows, calling `file.read()` or `list(csv.reader)` will load the entire dataset into RAM. If multiple users do this simultaneously, the server will crash due to Out-Of-Memory (OOM) errors.
+**How:** We use a text stream (`io.StringIO`) and iterate over it line-by-line using a generator (`for row in csv.DictReader(stream):`). 
+**Java equivalent:** Java `BufferedReader.readLine()` or Spring Batch `FlatFileItemReader`, which streams lines from disk.
+
+**Interview Q:** *"How would you handle a user uploading a 2-million row CSV file without crashing the server?"*
+**Answer:** I would never load the entire file into memory. I would stream the file from disk (or network/S3) using a generator. I would read it line-by-line, process it in chunks (e.g., 500 rows at a time), and use batch inserts (`bulk_create` / JDBC batching) to write to the database. Once a chunk is written, those rows are garbage collected.
+
+#### 2. Transaction Chunking
+**What:** Breaking a massive database insert into smaller, atomic batches.
+**Why:** Trying to insert 1,000,000 rows in a single database transaction locks tables for too long, uses excessive database memory, and risks rolling back all 1,000,000 rows if row 999,999 fails.
+**How:** We group rows into arrays of ~500. We wrap the `bulk_create` for each chunk in its own `with transaction.atomic():` block.
+**Java equivalent:** `@Transactional` on a chunk processing method in Spring Batch, or manual `TransactionTemplate` boundaries.
+
+**Interview Q:** *"If you are inserting 1 million rows, should you use one large database transaction or a transaction for every row?"*
+**Answer:** Neither. One transaction is too large and risks locking/rollback issues. A transaction per row is way too slow due to network and disk I/O overhead. The best approach is "chunking" — inserting batches of 500 to 1000 rows in a single transaction.
+
+#### 3. Graceful Error Handling (Partial Success)
+**What:** Allowing an import job to succeed for valid rows even if some rows contain errors.
+**Why:** If 1 row in a 10,000 row CSV has a bad email, failing the entire file is terrible UX. 
+**How:** We validate each row individually using our Serializer. Valid rows go into a `valid_contacts` array; invalid rows go into an `error_rows` array. We write both to the database, tracking the specific errors in an `ImportRow` table so the user can download an error report later.
+
+**Interview Q:** *"A user uploads a CSV, but 5 rows have invalid data. How do you handle this?"*
+**Answer:** I validate rows individually in memory. I insert the valid rows in bulk, and I log the failed rows (with their specific validation errors) to a separate 'ImportRow' error table. The import job finishes successfully, and the user can pull a report of just the 5 rows that failed to fix and re-upload.
+
+### Phase 7 Interview Questions (3)
+
+1. How do you prevent a Python/Java application from running out of memory when parsing a huge file?
+2. What is "chunking" in the context of database transactions?
+3. How do you design an import system that doesn't completely fail when encountering a single bad row of data?
