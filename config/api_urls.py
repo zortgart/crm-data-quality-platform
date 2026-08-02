@@ -29,12 +29,12 @@ urlpatterns = [
 
     # ==========================================================
     # COMPANIES — Phase 4
-    # path("companies/", include("companies.urls")),
+    path("companies/", include("companies.urls")),
     # ==========================================================
 
     # ==========================================================
     # CONTACTS — Phase 4
-    # path("contacts/", include("contacts.urls")),
+    path("contacts/", include("contacts.urls")),
     # ==========================================================
 
     # ==========================================================

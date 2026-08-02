@@ -50,7 +50,10 @@ LOCAL_APPS = [
     # Phase 2: database foundation
     "organizations",
     "accounts",
-    # Phase 4+: companies, contacts, imports, audit, enrichment, validation
+    # Phase 4: Core Domain
+    "companies",
+    "contacts",
+    # Phase 5+: imports, audit, enrichment, validation
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
