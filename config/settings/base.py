@@ -45,19 +45,16 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
-    # Phase 1
+    "accounts.apps.AccountsConfig",
+    "organizations.apps.OrganizationsConfig",
+    "companies.apps.CompaniesConfig",
+    "contacts.apps.ContactsConfig",
+    "validation.apps.ValidationConfig",
+    "imports.apps.ImportsConfig",
+    "core.apps.CoreConfig",
+    "notifications.apps.NotificationsConfig",
+    "enrichment.apps.EnrichmentConfig",
     "common",
-    # Phase 2: database foundation
-    "organizations",
-    "accounts",
-    # Phase 4: Core Domain
-    "companies",
-    "contacts",
-    # Phase 6: Data Quality
-    "validation",
-    # Phase 7: Large Data
-    "imports",
-    # Phase 8+: audit, enrichment
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -87,7 +84,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    # Phase 9: add RequestIDMiddleware, TenantMiddleware
+    "core.middleware.RequestIDMiddleware",
+    "core.middleware.AuditLogMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -166,6 +164,14 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE              # CRITICAL: always use timezone-aware datetimes
 
+# Caching Configuration (Phase 9)
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": config("REDIS_URL", default="redis://localhost:6379/1"),
+    }
+}
+
 # =============================================================
 # STATIC FILES
 # =============================================================
@@ -190,24 +196,25 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Java equivalent: Spring Security's HttpSecurity config
 # =============================================================
 REST_FRAMEWORK = {
-    # Every API call must include Authorization: Bearer <token>
-    # UNLESS the view explicitly sets permission_classes=[AllowAny]
-    # Java equivalent: .authorizeHttpRequests().anyRequest().authenticated()
-    "DEFAULT_AUTHENTICATION_CLASSES": [
+    "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ],
-    "DEFAULT_PERMISSION_CLASSES": [
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
-    ],
-    # Return JSON always; no browsable HTML API in responses
-    "DEFAULT_RENDERER_CLASSES": [
+    ),
+    "DEFAULT_RENDERER_CLASSES": (
         "rest_framework.renderers.JSONRenderer",
+    ),
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle"
     ],
-    # Phase 4: pagination
-    # "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    # "PAGE_SIZE": 20,
-    # Phase 9: throttling
-    # "DEFAULT_THROTTLE_CLASSES": [...],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "100/day",
+        "user": "1000/day"
+    }
 }
 
 # =============================================================
@@ -255,20 +262,26 @@ SIMPLE_JWT = {
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "filters": {
+        "request_id": {
+            "()": "core.log_filters.RequestIdFilter",
+        },
+    },
     "formatters": {
         "verbose": {
-            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+            "format": "INFO {asctime} [{correlation_id}] {module}:{filename}:{lineno} {message}",
             "style": "{",
         },
         "simple": {
-            "format": "{levelname} {asctime} {message}",
+            "format": "{levelname} {message}",
             "style": "{",
         },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "simple",
+            "formatter": "verbose",
+            "filters": ["request_id"],
         },
     },
     "root": {
@@ -282,9 +295,8 @@ LOGGING = {
             "propagate": False,
         },
         "django.db.backends": {
-            # Set to DEBUG to log all SQL queries (useful during dev)
             "handlers": ["console"],
-            "level": "WARNING",
+            "level": "DEBUG",
             "propagate": False,
         },
     },

@@ -56,3 +56,16 @@ LOGGING["loggers"]["django.db.backends"]["level"] = "DEBUG"  # noqa: F405
 # shell_plus auto-imports all models — very handy during dev.
 # =============================================================
 INSTALLED_APPS = INSTALLED_APPS + ["django_extensions"]  # noqa: F405
+
+# =============================================================
+# CACHE OVERRIDE
+# For local Windows development without Redis running,
+# we fallback to local memory caching to prevent ConnectionErrors
+# when the rate limiter tries to connect to Redis.
+# =============================================================
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "unique-snowflake",
+    }
+}

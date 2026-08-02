@@ -17,12 +17,12 @@
 | 6 — Data Quality | ✅ Complete | Normalize, validate, deduplicate, score |
 | 7 — Large Data | ✅ Complete | CSV import, streaming |
 | 8 — Background Processing | ✅ Complete | Celery + Redis |
-| 9 — Enterprise Features | 🔜 Next | Audit, caching, observability |
-| 10 — Testing + Performance | ⏳ | 1M row benchmarks |
-| 11 — Optional AI | ⏳ | AI provider abstraction |
-| 12 — Docker | ⏳ | Containerization |
-| 13 — CI/CD | ⏳ | GitHub Actions |
-| 14 — AWS | ⏳ | Production architecture |
+| 9 — Enterprise Features | ✅ Complete | Audit, caching, observability |
+| 10 — Notification System | ✅ Complete | Signals, REST endpoints |
+| 11 — Optional AI | ✅ Complete | AI provider abstraction, Enrichment API |
+| 12 — Docker | 📝 Theory | Containerization concepts in notes |
+| 13 — CI/CD | 📝 Theory | Pipeline concepts in notes |
+| 14 — AWS | 📝 Theory | Production architecture in notes |
 
 ---
 
@@ -330,6 +330,7 @@ Contact Input
 | `OPENAI_API_KEY` | Optional AI (Phase 11) | 11 |
 | `AWS_*` | Cloud deployment | 14 |
 
+
 ---
 
 ## PHASE 3 — Security Foundation (Added)
@@ -515,6 +516,56 @@ tests/
 
 ---
 
+## PHASE 5 — PostgreSQL + ORM (Added)
+
+### Database Optimizations
+
+**N+1 Query Prevention:**
+Verified that fetching a list of Contacts does not generate a separate query for each contact's Company or Organization. Achieved using Django's `select_related()` and validated via `CaptureQueriesContext` in `tests/test_performance.py`.
+
+**PostgreSQL Indexes Added:**
+1. `idx_contacts_org_name`: Composite index `(organization_id, last_name, first_name)` for fast sorting of a tenant's contact list.
+2. `idx_contacts_quality`: Single index on `(quality_score)` for dashboard aggregations.
+3. `idx_contacts_org_created`: Composite index on `(organization_id, created_at)` for time-series lookups.
+Note: Django automatically creates an index for any `ForeignKey` (e.g., `organization_id`), so base tenant isolation queries are already indexed.
+
+### Performance Testing Utilities
+- `common/management/commands/generate_mock_data.py`: CLI tool to generate 10,000+ synthetic contacts and 50+ companies in seconds using `bulk_create`.
+- `common/management/commands/explain_queries.py`: CLI tool to run and print PostgreSQL's `EXPLAIN ANALYZE` for typical ORM queries.
+
+### Test Count After Phase 5
+Total tests: **50** (Added `test_performance.py`)
+
+---
+
+## PHASE 6 — Data Quality (Added)
+
+### Pipeline Architecture
+
+When a `Contact` is created or updated via the API, `ContactViewSet` triggers a 3-step synchronous pipeline before returning the response:
+
+1. **Normalization:**
+   - **Email:** Lowercased, stripped.
+   - **Phone:** Parsed to E.164 standard using Google's `phonenumbers` library.
+   - **Company Name:** Stripped of common legal suffixes (e.g. "Inc.", "Corp.") and lowercased.
+   - **Job Title:** Common abbreviations expanded ("Sr. Eng." → "Senior Engineer").
+2. **Quality Scoring:**
+   - A `quality_score` (0-100) is dynamically computed based on data completeness (Valid Email: +30, Valid Phone: +20, Has Company: +20, First/Last Name: +20, Job Title: +10).
+3. **Duplicate Detection:**
+   - Evaluates the new/updated contact against all other contacts in the same organization.
+   - Creates `DuplicatePair` records using `bulk_create(ignore_conflicts=True)` with different confidence tiers:
+     - **L1 (100%):** Exact normalized email match.
+     - **L2 (80%):** Exact normalized phone match.
+     - **L3 (60%):** Exact normalized name + company match.
+
+### New Models
+- `DuplicatePair`: Tracks flagged duplicates. Uses `unique_together` for `(contact_a, contact_b)`.
+
+### Test Count After Phase 6
+Total tests: **60** (Added `test_validation.py` with 10 unit and integration tests)
+
+---
+
 ## PHASE 7 — Large Data (Added)
 
 ### Chunked CSV Processing Architecture
@@ -561,52 +612,123 @@ To prevent HTTP requests from hanging and timing out during large CSV uploads, p
 4. **Testing Eager Mode (`config/settings/test.py`):**
    - `CELERY_TASK_ALWAYS_EAGER = True` forces Celery tasks to execute synchronously during tests, avoiding the need for a running Redis broker in CI/CD pipelines while preserving the same code paths.
 
----
+### 3. Asynchronous Processing & Integrations (Phase 8)
+- **Message Broker:** Redis
+- **Task Queue:** Celery
+- **File Storage:** `FileField` on local disk for now (easy to swap to S3 in production).
 
-## PHASE 6 — Data Quality (Added)
-
-### Pipeline Architecture
-
-When a `Contact` is created or updated via the API, `ContactViewSet` triggers a 3-step synchronous pipeline before returning the response:
-
-1. **Normalization:**
-   - **Email:** Lowercased, stripped.
-   - **Phone:** Parsed to E.164 standard using Google's `phonenumbers` library.
-   - **Company Name:** Stripped of common legal suffixes (e.g. "Inc.", "Corp.") and lowercased.
-   - **Job Title:** Common abbreviations expanded ("Sr. Eng." → "Senior Engineer").
-2. **Quality Scoring:**
-   - A `quality_score` (0-100) is dynamically computed based on data completeness (Valid Email: +30, Valid Phone: +20, Has Company: +20, First/Last Name: +20, Job Title: +10).
-3. **Duplicate Detection:**
-   - Evaluates the new/updated contact against all other contacts in the same organization.
-   - Creates `DuplicatePair` records using `bulk_create(ignore_conflicts=True)` with different confidence tiers:
-     - **L1 (100%):** Exact normalized email match.
-     - **L2 (80%):** Exact normalized phone match.
-     - **L3 (60%):** Exact normalized name + company match.
-
-### New Models
-- `DuplicatePair`: Tracks flagged duplicates. Uses `unique_together` for `(contact_a, contact_b)`.
-
-### Test Count After Phase 6
-Total tests: **60** (Added `test_validation.py` with 10 unit and integration tests)
+### 4. Enterprise Features (Phase 9)
+- **Caching:** Redis-backed `CACHES` configuration with `LocMemCache` fallback for tests. DRF `cache_page` combined with `vary_on_headers('Authorization')` for tenant-safe caching.
+- **Audit Logging:** Custom `AuditLog` model with `AuditLogMiddleware` tracking CUD operations.
+- **Observability:** `RequestIDMiddleware` generating correlation IDs injected via `RequestIdFilter` to structured logs.
+- **Rate Limiting:** DRF `AnonRateThrottle` and `UserRateThrottle` configured for API protection.
 
 ---
 
-## PHASE 5 — PostgreSQL + ORM (Added)
+## PHASE 9 — Enterprise Features
 
-### Database Optimizations
+### Key Concepts
 
-**N+1 Query Prevention:**
-Verified that fetching a list of Contacts does not generate a separate query for each contact's Company or Organization. Achieved using Django's `select_related()` and validated via `CaptureQueriesContext` in `tests/test_performance.py`.
+#### 1. Tenant-Safe Caching
+- **Implementation:** DRF `@cache_page` combined with `@vary_on_headers('Authorization')`.
+- **Purpose:** Prevents cross-tenant data leaks. Caching by URL alone in a multi-tenant application will serve User A's data to User B.
+- **Backend:** Redis (LocMemCache in test mode).
 
-**PostgreSQL Indexes Added:**
-1. `idx_contacts_org_name`: Composite index `(organization_id, last_name, first_name)` for fast sorting of a tenant's contact list.
-2. `idx_contacts_quality`: Single index on `(quality_score)` for dashboard aggregations.
-3. `idx_contacts_org_created`: Composite index on `(organization_id, created_at)` for time-series lookups.
-Note: Django automatically creates an index for any `ForeignKey` (e.g., `organization_id`), so base tenant isolation queries are already indexed.
+#### 2. Audit Logging
+- **Implementation:** Custom `AuditLogMiddleware` and `AuditLog` model.
+- **Purpose:** Tracks every CUD (Create, Update, Delete) operation automatically without developer intervention.
+- **Data Captured:** User, organization, path, method, IP address, and request payload.
 
-### Performance Testing Utilities
-- `common/management/commands/generate_mock_data.py`: CLI tool to generate 10,000+ synthetic contacts and 50+ companies in seconds using `bulk_create`.
-- `common/management/commands/explain_queries.py`: CLI tool to run and print PostgreSQL's `EXPLAIN ANALYZE` for typical ORM queries.
+#### 3. Observability
+- **Implementation:** `RequestIDMiddleware` generates UUIDs for every request. `RequestIdFilter` injects this into Python's `logging` system.
+- **Purpose:** Ensures every log line has a `[correlation_id]`. Critical for distributed tracing and debugging in enterprise systems.
 
-### Test Count After Phase 5
-Total tests: **50** (Added `test_performance.py`)
+#### 4. Rate Limiting
+- **Implementation:** DRF `AnonRateThrottle` and `UserRateThrottle`.
+- **Purpose:** Protects the API from brute force, scraping, and DoS attacks.
+
+### Test Count After Phase 9
+Total tests: **64** (Refactored some endpoints, fixed missing dependencies, forced caching overrides in test mode).
+
+---
+
+## PHASE 10 — Notification System
+
+### Key Concepts
+
+#### 1. Django Signals
+- **Implementation:** `post_save` signal connected to `ImportJob`.
+- **Purpose:** Decouples the core business logic (importing CSVs) from side-effects (notifying the user). 
+- **Action:** Automatically creates a `Notification` object when an `ImportJob` reaches a terminal status (`COMPLETED` or `FAILED`).
+
+#### 2. REST Endpoints
+- **Implementation:** `NotificationViewSet` with custom `@action` decorators for `read` and `read_all`.
+- **Purpose:** Allows frontend applications to query unread notifications, mark them as read, or mark all as read.
+
+### Test Count After Phase 10
+Total tests: **68** (Added 4 integration tests for the notification signals and API endpoints).
+
+---
+
+## PHASE 11 — Optional AI / Advanced Data
+
+### Key Concepts
+
+#### 1. AI Provider Abstraction (Strategy Pattern)
+- **Implementation:** `BaseEnrichmentProvider` abstract base class with `MockEnrichmentProvider` and `OpenAIEnrichmentProvider` implementations.
+- **Purpose:** Allows easy swapping of AI backends without modifying core business logic.
+- **Factory:** `get_enrichment_provider()` returns the correct provider based on `settings.ENRICHMENT_PROVIDER`.
+
+#### 2. Model Enhancements
+- Added `description` to `Company` model.
+- Added `linkedin_url` to `Contact` model.
+- Both fields are hydrated via AI data enrichment endpoints.
+
+#### 3. Enrichment Endpoints
+- `POST /api/v1/companies/{id}/enrich/`: Triggers AI to summarize industry, size, and description based on company name and domain.
+- `POST /api/v1/contacts/{id}/enrich/`: Triggers AI to infer job title and linkedin url based on name and company context.
+
+### Test Count After Phase 11
+Total tests: **71** (Added 3 integration tests for the enrichment service and endpoints).
+
+---
+
+## PHASE 12 — Docker Containerization (Theoretical)
+
+### Key Concepts
+Since this project is focused on data engineering and backend logic, Docker was skipped in physical implementation but the architecture remains the same. A standard `docker-compose.yml` would orchestrate:
+1. `web` (Django app via Gunicorn)
+2. `db` (PostgreSQL)
+3. `redis` (Cache & Broker)
+4. `worker` (Celery process)
+
+---
+
+## PHASE 13 — CI/CD Pipeline (Theoretical)
+
+### Key Concepts
+A standard CI/CD pipeline (e.g., using GitHub Actions) for this project would include:
+1. **Continuous Integration (CI):**
+   - Linting (flake8, black)
+   - Running the test suite (`pytest`) with PostgreSQL and Redis services spun up via Docker.
+   - Code coverage reporting.
+2. **Continuous Deployment (CD):**
+   - Triggered on push to `main`.
+   - Builds the Docker image.
+   - Pushes the image to a container registry (e.g., AWS ECR).
+   - Triggers deployment on the target environment (e.g., ECS or EKS).
+
+---
+
+## PHASE 14 — AWS Production Architecture (Theoretical)
+
+### Key Concepts
+To deploy this CRM Data Quality Platform to AWS for high availability and scale, the architecture would map as follows:
+- **Application Servers:** AWS ECS (Fargate) or EKS running the Django web containers and Celery worker containers.
+- **Database:** Amazon RDS for PostgreSQL (Multi-AZ for failover, with read replicas for heavy analytical queries).
+- **Caching & Message Broker:** Amazon ElastiCache for Redis (handles Celery queues, rate limiting, and DRF caching).
+- **Storage:** Amazon S3 (for handling large CSV uploads and static/media files) integrated with Django via `django-storages`.
+- **Load Balancing:** AWS Application Load Balancer (ALB) to route traffic and terminate SSL/TLS.
+- **Security:** AWS Secrets Manager for injecting `DJANGO_SECRET_KEY`, `DATABASE_URL`, etc. at runtime. Private subnets for the database and cache.
+
+---

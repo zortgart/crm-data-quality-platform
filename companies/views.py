@@ -14,11 +14,17 @@
 #   OR Spring Data REST (which also auto-generates endpoints)
 # =============================================================
 
-from rest_framework import viewsets, filters
+from rest_framework import viewsets, filters, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+from django.views.decorators.vary import vary_on_headers
 from rest_framework.permissions import IsAuthenticated
 from accounts.permissions import IsManagerOrAbove, IsAnalystOrAbove, IsSameOrganization
 from .models import Company
 from .serializers import CompanyListSerializer, CompanyDetailSerializer
+from enrichment.service import get_enrichment_provider
 
 
 class CompanyViewSet(viewsets.ModelViewSet):
@@ -78,6 +84,14 @@ class CompanyViewSet(viewsets.ModelViewSet):
             permission_classes = [IsManagerOrAbove]
         return [permission() for permission in permission_classes]
 
+    @method_decorator(cache_page(60 * 5))
+    @method_decorator(vary_on_headers("Authorization"))
+    def list(self, request, *args, **kwargs):
+        """
+        List companies. Cached for 5 minutes per user/token to prevent DB hits.
+        """
+        return super().list(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         """
         SECURITY: Always inject organization from request.user.
@@ -92,3 +106,32 @@ class CompanyViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         """Prevent organization from being changed on update."""
         serializer.save(organization=self.request.user.organization)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsManagerOrAbove])
+    def enrich(self, request, pk=None):
+        """
+        Phase 11: Call the configured AI provider to enrich this company.
+        """
+        company = self.get_object()
+        provider = get_enrichment_provider()
+        
+        enriched_data = provider.enrich_company(company.name, company.domain)
+        
+        updated = False
+        if "industry" in enriched_data and not company.industry:
+            company.industry = enriched_data["industry"]
+            updated = True
+            
+        if "size" in enriched_data and not company.size:
+            company.size = enriched_data["size"]
+            updated = True
+            
+        if "description" in enriched_data and not company.description:
+            company.description = enriched_data["description"]
+            updated = True
+            
+        if updated:
+            company.save(update_fields=["industry", "size", "description"])
+            
+        serializer = self.get_serializer(company)
+        return Response(serializer.data, status=status.HTTP_200_OK)

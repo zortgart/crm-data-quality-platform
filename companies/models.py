@@ -62,6 +62,12 @@ class Company(UUIDModel, TimeStampedModel):
         help_text="Industry sector, e.g. 'Technology', 'Healthcare'."
     )
 
+    description = models.TextField(
+        blank=True, 
+        default="", 
+        help_text="AI-generated or manual company description."
+    )
+
     website = models.URLField(
         max_length=500,
         blank=True,

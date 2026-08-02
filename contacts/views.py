@@ -2,11 +2,14 @@
 # contacts/views.py — Contact ViewSet
 # =============================================================
 
-from rest_framework import viewsets, filters
+from rest_framework import viewsets, filters, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from accounts.permissions import IsManagerOrAbove, IsAnalystOrAbove
 from validation.normalizers import normalize_email, normalize_phone, normalize_job_title
 from validation.quality_scorer import calculate_quality_score
 from validation.duplicate_detector import detect_duplicates
+from enrichment.service import get_enrichment_provider
 from .models import Contact
 from .serializers import ContactListSerializer, ContactDetailSerializer
 
@@ -86,7 +89,34 @@ class ContactViewSet(viewsets.ModelViewSet):
         contact.quality_score = calculate_quality_score(contact)
         
         # Save updates to the DB
-        contact.save(update_fields=["normalized_email", "normalized_phone", "job_title", "quality_score"])
+        contact.save(update_fields=["normalized_email", "normalized_phone", "job_title", "quality_score", "linkedin_url"])
         
         # 3. Duplicate Detection
         detect_duplicates(contact)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsManagerOrAbove])
+    def enrich(self, request, pk=None):
+        """
+        Phase 11: Call the configured AI provider to enrich this contact.
+        """
+        contact = self.get_object()
+        provider = get_enrichment_provider()
+        
+        company_name = contact.company.name if contact.company else None
+        enriched_data = provider.enrich_contact(contact.first_name, contact.last_name, company_name)
+        
+        updated = False
+        if "job_title" in enriched_data and not contact.job_title:
+            contact.job_title = enriched_data["job_title"]
+            updated = True
+            
+        if "linkedin_url" in enriched_data and not contact.linkedin_url:
+            contact.linkedin_url = enriched_data["linkedin_url"]
+            updated = True
+            
+        if updated:
+            # Re-run pipeline to update quality score based on new data
+            self._run_quality_pipeline(contact)
+            
+        serializer = self.get_serializer(contact)
+        return Response(serializer.data, status=status.HTTP_200_OK)

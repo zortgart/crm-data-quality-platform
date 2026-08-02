@@ -737,3 +737,142 @@ response = client.get("/api/v1/auth/me/")
 
 1. Explain the Broker / Worker pattern and why it's necessary for web applications.
 2. How do you handle unit testing for code that runs asynchronously in a background worker?
+
+---
+
+---
+
+## PHASE 9 — Enterprise Features (Audit, Cache, Observability)
+
+### Key Concepts
+
+#### 1. Tenant-Safe Caching
+**What:** Using caching (Redis/LocMem) to store frequently accessed but rarely changed data (like a list of companies) to save database queries.
+**Why:** Improves API response times and reduces DB load.
+**The Multi-Tenant Danger:** If you use `@cache_page` on `/api/v1/companies/` blindly, User A's response is cached. User B visits the same URL and gets User A's companies — a massive data leak.
+**How:** We combine `@cache_page(60 * 5)` with `@vary_on_headers("Authorization")`. This ensures the cache key is unique *per user token*, safely isolating the cache per tenant.
+**Java equivalent:** `@Cacheable` with a SpEL expression incorporating the principal/tenant ID (e.g., `@Cacheable(value = "companies", key = "#principal.organizationId")`).
+
+**Interview Q:** *"How do you safely cache an API response in a multi-tenant application?"*
+**Answer:** You must never cache globally by URL alone. The cache key must include the tenant identifier. In Django REST Framework, I use `@vary_on_headers("Authorization")` alongside the cache decorator so that every user gets their own isolated cached response.
+
+#### 2. Audit Logging
+**What:** Tracking every CUD (Create, Update, Delete) operation in the system.
+**Why:** Enterprise compliance (SOC2, HIPAA) requires knowing *who* changed *what* and *when*.
+**How:** A custom `AuditLogMiddleware` intercepts `POST`, `PUT`, `PATCH`, and `DELETE` requests. It extracts the user, organization, path, IP, and raw payload, and saves an `AuditLog` record asynchronously.
+**Java equivalent:** Hibernate Envers for entity-level auditing, or a Spring `HandlerInterceptor` for API-level auditing.
+
+**Interview Q:** *"How would you implement an audit trail to satisfy compliance requirements?"*
+**Answer:** I would implement a middleware (or database triggers) that intercepts all state-altering requests (POST/PUT/DELETE). It logs the authenticated user, the timestamp, the IP address, the endpoint, and the payload/changes to a secure, append-only AuditLog table.
+
+#### 3. Observability & Correlation IDs
+**What:** Assigning a unique UUID (Correlation ID or `X-Request-ID`) to every single incoming HTTP request.
+**Why:** In modern/microservice architectures, a single request might generate 50 log lines across different modules. Without a correlation ID, it is impossible to group those logs together when debugging a failure.
+**How:** A `RequestIDMiddleware` generates a UUID and stores it in thread-local storage (`threading.local`). A custom Python `logging.Filter` injects this ID into every log formatter.
+**Java equivalent:** MDC (Mapped Diagnostic Context) in SLF4J/Logback, combined with a generic Servlet Filter.
+
+**Interview Q:** *"If an API request fails in production and generates 20 different log statements, how do you group them together to understand what happened?"*
+**Answer:** I use Correlation IDs. A middleware generates a unique UUID at the start of the request and stores it in thread-local storage (or MDC in Java). A custom logging filter injects this ID into every log line. In our log aggregator (like Datadog or Splunk), I can simply search for that UUID and see the exact chronological trace of that specific request.
+
+### Phase 9 Interview Questions (3)
+
+1. What is the danger of caching API responses in a multi-tenant SaaS, and how do you prevent it?
+2. What are the key pieces of information you must capture in an enterprise audit log?
+3. What is a Correlation ID (or Request ID) and why is it critical for observability?
+
+---
+
+## PHASE 10 — Notification System
+
+### Key Concepts
+
+#### 1. Event-Driven Architecture (Django Signals)
+**What:** A way to allow decoupled applications get notified when actions occur elsewhere in the framework (Publish/Subscribe pattern).
+**Why:** If you hardcode notification logic into the CSV import process, your import logic becomes tightly coupled with the notification logic. Signals allow the `notifications` app to "listen" for `ImportJob` updates without the `imports` app needing to know about it.
+**How:** We use `@receiver(post_save, sender=ImportJob)`. When an import finishes, it fires an event. The receiver catches it and creates a Notification.
+**Java equivalent:** Spring Application Events (`ApplicationEventPublisher.publishEvent()`, `@EventListener`).
+
+**Interview Q:** *"How do you decouple side-effects (like sending an email or notification) from core business logic?"*
+**Answer:** I use an event-driven approach. In Django, this means using Signals. Instead of hardcoding the notification inside the `process_csv` function, the function simply saves the state of the job. A signal receiver listens for that `post_save` event and handles creating the notification. This keeps the core domain clean and adheres to the Single Responsibility Principle.
+
+#### 2. Custom API Actions
+**What:** Adding non-CRUD behavior to a REST ViewSet.
+**Why:** Sometimes you need an endpoint that performs a specific action rather than just updating an entire object, like "Marking a notification as read."
+**How:** Using DRF's `@action(detail=True, methods=['post'])` to expose `/api/v1/notifications/{id}/read/`.
+**Java equivalent:** Adding a specific POST mapping `@PostMapping("/{id}/read")` in a Spring REST Controller.
+
+**Interview Q:** *"How do you model an action like 'mark as read' in a RESTful API?"*
+**Answer:** While REST is generally resource-oriented, pure state updates can sometimes be clunky if the client has to send the full JSON object just to flip a boolean. A common and accepted pattern is to expose a sub-resource or an action endpoint, like `POST /api/v1/notifications/{id}/read/`, which updates the internal state securely.
+
+### Phase 10 Interview Questions (2)
+
+1. What is the Observer pattern (Publish/Subscribe), and how do Django Signals implement it?
+2. What are the pros and cons of using Signals vs placing the logic directly in the Model's `.save()` method? (Pro: decoupled. Con: can be hard to trace/debug if abused).
+
+---
+
+## PHASE 11 — Optional AI / Advanced Data
+
+### Key Concepts
+
+#### 1. The Strategy Pattern for AI Providers
+**What:** A design pattern that defines a family of algorithms (e.g. AI models), encapsulates each one, and makes them interchangeable.
+**Why:** You don't want your Views tightly coupled to the `openai` python package. If tomorrow you switch to Google Gemini or Anthropic Claude, or if you need to run offline tests, you don't want to rewrite your API logic.
+**How:** We created `BaseEnrichmentProvider` (an Abstract Base Class) and concrete classes `OpenAIEnrichmentProvider` and `MockEnrichmentProvider`. A factory function `get_enrichment_provider()` decides which one to use at runtime.
+**Java equivalent:** Interface `EnrichmentProvider` with implementations `@Service class OpenAiProvider implements EnrichmentProvider`. Spring uses `@Qualifier` or `@ConditionalOnProperty` to inject the right bean.
+
+**Interview Q:** *"How would you integrate a 3rd-party API like OpenAI into your application without tightly coupling your business logic to it?"*
+**Answer:** I use the Strategy Pattern (or Adapter Pattern). I define an interface (e.g., `EnrichmentProvider`) that outlines the inputs and expected structured outputs. Then I build a concrete implementation for OpenAI. My views/services only interact with the interface. This makes unit testing trivial (via a MockProvider) and allows for future-proofing if we switch AI vendors.
+
+### Phase 11 Interview Questions (1)
+
+1. What is the Strategy Pattern and how did you use it in the data enrichment feature? (Answered above).
+
+---
+
+## PHASE 12 — Docker Containerization (Interview Notes)
+
+### How to Dockerize a Django/Celery/Postgres Stack
+
+**Interview Q:** *"How would you containerize this application for production?"*
+**Answer:** I would use Docker and `docker-compose`. I'd write a multi-stage `Dockerfile` for the Django app to keep the image size small. Then, my `docker-compose.yml` would define four services:
+1. **db**: Official `postgres:16` image with a mounted volume for data persistence.
+2. **redis**: Official `redis:7-alpine` image.
+3. **web**: The Django app built from the Dockerfile, exposed on port 8000, running via a WSGI server like `gunicorn`. It depends on `db` and `redis`.
+4. **worker**: The same Django image, but the startup command is overridden to `celery -A config worker --loglevel=info`.
+
+**Key Docker Best Practices to Mention in Interviews:**
+- **Multi-stage builds:** Compile dependencies (like `psycopg2`) in a builder stage, and copy only the installed wheels/libs to the final slim image.
+- **Run as non-root:** Create a dedicated user inside the Dockerfile (e.g., `django-user`) so the container doesn't run as root, mitigating security risks if the container is compromised.
+- **Wait-for-it scripts:** The web container must wait for the database to be ready before running `python manage.py migrate`.
+- **Environment variables:** Never hardcode secrets in the Dockerfile. Pass them at runtime via `.env` files or orchestration secrets (like AWS Secrets Manager).
+
+---
+
+## PHASE 13 — CI/CD Pipeline (Interview Notes)
+
+### How to Build a CI/CD Pipeline for Django
+
+**Interview Q:** *"How do you ensure code quality before it reaches production?"*
+**Answer:** I implement a Continuous Integration (CI) pipeline using a tool like GitHub Actions or GitLab CI. Whenever a developer opens a Pull Request, the pipeline automatically:
+1. Runs linters (`flake8`, `black`) to ensure style consistency.
+2. Spins up ephemeral database and cache services (Postgres and Redis).
+3. Executes the full `pytest` suite.
+4. Fails the PR if any tests fail or if test coverage drops below a certain threshold.
+
+**Interview Q:** *"How do you deploy this application?"*
+**Answer:** Through Continuous Deployment (CD). Once code is merged to `main`, the pipeline builds a new Docker image, tags it with the Git commit hash, pushes it to an Elastic Container Registry (ECR), and then updates the ECS/EKS service to seamlessly roll out the new containers with zero downtime.
+
+---
+
+## PHASE 14 — AWS Production Architecture (Interview Notes)
+
+### Architecting for Scale and Reliability
+
+**Interview Q:** *"If we need to handle 10,000 requests per minute and large CSV uploads, how would you architect this on AWS?"*
+**Answer:** 
+1. **Compute:** I'd run the Django API and Celery workers on ECS Fargate for serverless, autoscaling compute.
+2. **Database:** I'd use Amazon RDS for PostgreSQL with Multi-AZ enabled for high availability. 
+3. **Broker/Cache:** Amazon ElastiCache (Redis) would handle the Celery task queue and API caching.
+4. **Storage:** I would never store CSVs on the local disk in production; I'd use Amazon S3 via `django-storages`. The Django API would generate a pre-signed S3 URL for the client to upload the file directly to S3, and then trigger a Celery task to stream and process it from there.
+5. **Security:** The Database and Redis would be in private subnets, completely inaccessible from the public internet. The Django app would receive traffic only through an Application Load Balancer (ALB) sitting in public subnets.

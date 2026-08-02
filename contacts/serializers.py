@@ -45,6 +45,7 @@ class ContactDetailSerializer(serializers.ModelSerializer):
             "email",
             "phone",
             "job_title",
+            "linkedin_url",
             "company",        # UUID input (FK)
             "company_name",   # string output (read-only)
             "city",

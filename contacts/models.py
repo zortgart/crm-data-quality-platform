@@ -63,6 +63,13 @@ class Contact(UUIDModel, TimeStampedModel):
         help_text="Phone number (any format — normalized in Phase 6)."
     )
 
+    linkedin_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="LinkedIn profile URL."
+    )
+
     job_title = models.CharField(
         max_length=150,
         blank=True,

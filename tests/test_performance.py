@@ -71,7 +71,9 @@ class TestPerformance:
             response = api_client.get("/api/v1/contacts/")
         
         assert response.status_code == 200
-        assert len(response.json()) == 10  # 10 contacts
+        data = response.json()
+        results = data.get("results", data) if isinstance(data, dict) else data
+        assert len(results) == 10  # 10 contacts
 
         # 1 query for the contacts + companies + organizations JOIN.
         # No extra queries for each company's name.

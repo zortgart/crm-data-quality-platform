@@ -49,6 +49,7 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
             "name",
             "domain",
             "industry",
+            "description",
             "website",
             "phone",
             "city",

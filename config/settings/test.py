@@ -34,8 +34,17 @@ PASSWORD_HASHERS = [
 # Run Celery tasks synchronously in tests
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_STORE_EAGER_RESULT = True
+# Use in-memory messaging for tests instead of Redis
 CELERY_BROKER_URL = "memory://"
 CELERY_RESULT_BACKEND = "cache+memory://"
+
+# Phase 9: Override CACHES to use LocMemCache so tests don't need Redis
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "unique-snowflake",
+    }
+}
 
 # Suppress SQL logging during tests for cleaner output
 LOGGING["loggers"]["django.db.backends"]["level"] = "WARNING"  # noqa: F405
